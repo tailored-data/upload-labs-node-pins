@@ -1,0 +1,62 @@
+{
+	"name": "NodePins",
+	"namespace": "Taylor",
+	"version_number": "1.0.0",
+	"description": "Pin nodes to your screen as translucent live overlays that stay visible while you pan the desktop. Unlocked through a token-cost upgrade; each level adds a pin slot. Every pin has its own settings for opacity and size.",
+	"website_url": "https://github.com/tailored-data/upload-labs-node-pins",
+	"dependencies": [],
+	"extra": {
+		"godot": {
+			"authors": ["Taylor"],
+			"compatible_game_version": ["2.2.12"],
+			"compatible_mod_loader_version": ["7.0.1"],
+			"incompatibilities": [],
+			"config_schema": {
+				"title": "Node Pins",
+				"type": "object",
+				"properties": {
+					"perk_base_cost": {
+						"title": "Upgrade base cost (tokens)",
+						"description": "Token cost of the first Node Pins upgrade level.",
+						"type": "number",
+						"default": 4,
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"perk_cost_growth": {
+						"title": "Upgrade cost growth",
+						"description": "Cost multiplier per level. 2 doubles the price each level.",
+						"type": "number",
+						"default": 2,
+						"minimum": 1,
+						"maximum": 10
+					},
+					"perk_max_level": {
+						"title": "Maximum upgrade level",
+						"description": "Maximum pin slots purchasable.",
+						"type": "number",
+						"default": 5,
+						"minimum": 1,
+						"maximum": 20
+					},
+					"default_opacity": {
+						"title": "Default pin opacity",
+						"description": "Starting transparency of newly pinned nodes (0.2 = very transparent, 1 = opaque).",
+						"type": "number",
+						"default": 0.75,
+						"minimum": 0.2,
+						"maximum": 1
+					},
+					"default_pin_width": {
+						"title": "Default pin width (px)",
+						"description": "Starting on-screen width of newly pinned nodes.",
+						"type": "number",
+						"default": 300,
+						"minimum": 180,
+						"maximum": 480
+					}
+				}
+			}
+		}
+	}
+}
