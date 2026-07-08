@@ -2,6 +2,8 @@
 
 Pin your nodes to the screen. A gameplay mod for [Upload Labs](https://store.steampowered.com/app/3606890/Upload_Labs/) built on the [Godot Mod Loader](https://wiki.godotmodding.com/), which ships inside the game — no patching, no game file changes.
 
+Steam Workshop: [Node Pins (QoL) - https://steamcommunity.com/sharedfiles/filedetails/?id=3760233672](https://steamcommunity.com/sharedfiles/filedetails/?id=3760233672)
+
 ## Features
 
 - **Pin any node to your screen.** Select a node and press the pin button (⚲) in the options bar. A live, translucent view of the node — titled **Node Pin #1**, **#2**, … — appears at the top-center of your screen and stays there while you pan and zoom anywhere on the desktop.
