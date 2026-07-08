@@ -104,9 +104,11 @@ func pin(window: Control, settings: Dictionary = {}) -> void:
 
 	var merged := {
 		"opacity": default_opacity,
-		"scale": default_scale,
 	}
 	merged.merge(settings, true)
+	# Pin scale is a global config value, not a per-pin setting (older state
+	# files may still carry a per-pin "scale" key — always override it).
+	merged["scale"] = default_scale
 
 	var view: PanelContainer = PinViewScript.new()
 	view.setup(window, self, _next_pin_number(), merged)

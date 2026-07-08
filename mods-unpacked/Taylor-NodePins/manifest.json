@@ -1,7 +1,7 @@
 {
 	"name": "NodePins",
 	"namespace": "Taylor",
-	"version_number": "1.2.0",
+	"version_number": "1.3.0",
 	"description": "Pin nodes to your screen as interactive, translucent live overlays that stay visible while you pan the desktop. Unlocked through a token-cost upgrade; each level adds a pin slot. Pins are draggable, colorized, and have per-pin opacity and scale settings.",
 	"website_url": "https://github.com/tailored-data/upload-labs-node-pins",
 	"dependencies": [],

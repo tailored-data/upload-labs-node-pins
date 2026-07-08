@@ -7,7 +7,8 @@ extends PanelContainer
 #
 # The pin window is draggable by its header, titled "Node Pin #N", tints
 # the real node with a cycleable vibrant color, and sizes itself relative
-# to the node's own dimensions (pin_scale x node size, plus padding).
+# to the node's own dimensions (the global default_pin_scale config value
+# x node size, plus padding). The settings (cog) panel adjusts opacity.
 
 const MIN_OPACITY := 0.2
 const MAX_OPACITY := 1.0
@@ -38,7 +39,6 @@ var _camera: Camera2D
 var _vp_container: SubViewportContainer
 var _title: Label
 var _settings_panel: PanelContainer
-var _scale_edit: LineEdit
 var _panel_style: StyleBoxFlat
 var _saved_position := Vector2.INF
 var _dragging := false
@@ -60,7 +60,6 @@ func setup(p_window: Control, p_manager: Node, p_number: int, settings: Dictiona
 func get_settings() -> Dictionary:
 	return {
 		"opacity": opacity,
-		"scale": pin_scale,
 		"color": color_index,
 		"x": position.x,
 		"y": position.y,
@@ -143,7 +142,6 @@ func _ready() -> void:
 	_settings_panel.add_child(settings_box)
 
 	settings_box.add_child(_make_opacity_row())
-	settings_box.add_child(_make_scale_row())
 
 	_vp_container = SubViewportContainer.new()
 	_vp_container.stretch = true
@@ -396,53 +394,10 @@ func _make_opacity_row() -> HBoxContainer:
 	return row
 
 
-func _make_scale_row() -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-
-	var icon := TextureRect.new()
-	icon.texture = load("res://textures/icons/zoom_in.png")
-	icon.custom_minimum_size = Vector2(20, 20)
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.tooltip_text = "Scale"
-	row.add_child(icon)
-
-	_scale_edit = LineEdit.new()
-	_scale_edit.text = String.num(pin_scale, 2)
-	_scale_edit.custom_minimum_size = Vector2(80, 0)
-	_scale_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_scale_edit.tooltip_text = "Pin scale (%.1f - %.1f)" % [MIN_SCALE, MAX_SCALE]
-	_scale_edit.text_submitted.connect(func(_text: String) -> void: _on_scale_save())
-	row.add_child(_scale_edit)
-
-	var save_button := _make_icon_button("res://textures/icons/save.png")
-	save_button.tooltip_text = "Save scale"
-	save_button.pressed.connect(_on_scale_save)
-	row.add_child(save_button)
-
-	return row
-
-
 func _on_opacity_changed(value: float) -> void:
 	opacity = clampf(value, MIN_OPACITY, MAX_OPACITY)
 	modulate.a = opacity
 	manager.call("pin_settings_changed", window_key, get_settings())
-
-
-func _on_scale_save() -> void:
-	var text := _scale_edit.text.strip_edges()
-	if not text.is_valid_float():
-		_scale_edit.text = String.num(pin_scale, 2)
-		Sound.play("error")
-		return
-
-	pin_scale = clampf(text.to_float(), MIN_SCALE, MAX_SCALE)
-	_scale_edit.text = String.num(pin_scale, 2)
-	_update_layout(true)
-	_clamp_to_screen.call_deferred()
-	manager.call("pin_settings_changed", window_key, get_settings())
-	Sound.play("click2")
 
 
 func _on_color_pressed() -> void:
