@@ -148,12 +148,17 @@ func _ready() -> void:
 	_vp_container = SubViewportContainer.new()
 	_vp_container.stretch = true
 	_vp_container.mouse_filter = Control.MOUSE_FILTER_STOP
+	_vp_container.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	# GUI input cannot be forwarded through a shared-world viewport (the
+	# game's controls belong to the root viewport), so clicks on the view
+	# are translated to world coordinates and dispatched manually.
+	_vp_container.gui_input.connect(_on_view_gui_input)
 	root.add_child(_vp_container)
 
 	_viewport = SubViewport.new()
 	_viewport.transparent_bg = true
 	_viewport.disable_3d = true
-	_viewport.gui_disable_input = false
+	_viewport.gui_disable_input = true
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_vp_container.add_child(_viewport)
 	_viewport.world_2d = get_viewport().world_2d
@@ -255,6 +260,90 @@ func _apply_window_tint() -> void:
 func _clamp_to_screen() -> void:
 	var viewport_size := get_viewport_rect().size
 	position = position.clamp(Vector2.ZERO, (viewport_size - size).max(Vector2.ZERO))
+
+
+# --- Interaction: clicks on the pin are mapped into the world and applied
+# --- to the real node, so connections can be made through the pin.
+
+func _on_view_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		if _dispatch_world_click(_view_to_world(event.position)):
+			accept_event()
+
+
+func _view_to_world(view_pos: Vector2) -> Vector2:
+	var viewport_size := Vector2(_viewport.size)
+	return _camera.global_position + (view_pos - viewport_size * 0.5) / _camera.zoom.x
+
+
+# Applies a click at the given world point to the pinned node. Connector
+# buttons (inputs/outputs) get the game's own press handling — starting,
+# cancelling, or completing a connection exactly like a direct click —
+# and regular buttons inside the node get pressed. Returns true if the
+# click hit something.
+func _dispatch_world_click(world_point: Vector2) -> bool:
+	if not is_instance_valid(window):
+		return false
+	if Globals.tool == Utils.tools.MOVE:
+		return false
+
+	var connector: Control = _find_connector_at(world_point)
+	if connector != null:
+		var click := InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.pressed = false
+		# ConnectorButton resolves the drop point as global_position +
+		# event.position, so make that sum equal the world point.
+		click.position = world_point - connector.global_position
+		connector.call("handle_press_input", click)
+		return true
+
+	var button: BaseButton = _find_button_at(world_point)
+	if button != null:
+		button.pressed.emit()
+		return true
+
+	return false
+
+
+func _find_connector_at(world_point: Vector2) -> Control:
+	if "containers" not in window:
+		return null
+
+	var best: Control = null
+	var best_distance := INF
+	for container in window.get("containers"):
+		if not is_instance_valid(container):
+			continue
+		for connector_name: String in ["InputConnector", "OutputConnector"]:
+			var connector: Control = container.get_node_or_null(connector_name)
+			if connector == null:
+				continue
+			if connector.get("disabled") or not connector.is_visible_in_tree():
+				continue
+			var rect: Rect2 = connector.get_global_rect().grow(8.0)
+			if rect.has_point(world_point):
+				var distance := rect.get_center().distance_to(world_point)
+				if distance < best_distance:
+					best_distance = distance
+					best = connector
+	return best
+
+
+func _find_button_at(world_point: Vector2) -> BaseButton:
+	var best: BaseButton = null
+	var best_distance := INF
+	for node: Node in window.find_children("*", "BaseButton", true, false):
+		var button := node as BaseButton
+		if button == null or button.disabled or not button.is_visible_in_tree():
+			continue
+		var rect: Rect2 = button.get_global_rect()
+		if rect.has_point(world_point):
+			var distance := rect.get_center().distance_to(world_point)
+			if distance < best_distance:
+				best_distance = distance
+				best = button
+	return best
 
 
 func _on_header_gui_input(event: InputEvent) -> void:

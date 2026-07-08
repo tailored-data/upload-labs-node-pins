@@ -7,7 +7,7 @@ Pin your nodes to the screen. A gameplay mod for [Upload Labs](https://store.ste
 ## What it does
 
 - **Pin any node to your screen.** Select a node and press the new pin button (⚲) in the options bar. A live, translucent view of the node — titled **Node Pin #1**, **#2**, … — appears at the top-center of your screen and stays there while you pan and zoom anywhere on the desktop.
-- **Fully interactive.** Pins are not static pictures: clicks pass through into the real node, so you can work its inputs/outputs, connectors, and buttons directly inside the pin.
+- **Fully interactive.** Pins are not static pictures: clicks inside a pin are mapped into the world and applied to the real node. Click an output connector on a node you're looking at, then click the input connector **inside the pin** (or vice versa) to connect them — no more scrolling back and forth. Regular buttons on the node work through the pin too.
 - **Draggable.** Grab a pin by its header and place it anywhere on your screen; positions are remembered.
 - **Colorized nodes.** The pinned node itself is tinted a vibrant color in the world so it's easy to spot, and the pin's border matches. The 🎨 button cycles through six color choices per pin.
 - **Sized to the node.** Each pin scales relative to the node's own width and height with even padding. The ⚙ settings panel has an opacity slider and a **scale textbox** — type a value (0.2–2.0) and press the save button to apply.

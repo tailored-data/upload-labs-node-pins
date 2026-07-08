@@ -257,59 +257,122 @@ func _schedule_write() -> void:
 		_write_timer.start()
 
 
-# End-to-end exercise of the pin lifecycle, enabled by setting the
-# environment variable NODEPINS_SELFTEST=1. Uses a runtime capacity
-# override instead of granting perk levels, so the savegame is untouched.
+# End-to-end exercise of the pin connection flow, enabled by setting the
+# environment variable NODEPINS_SELFTEST=1. Finds a compatible output ->
+# input connector pair on two different nodes, pins both, performs the
+# connection entirely through the pin views, verifies it, then deletes it
+# again — so the savegame is left exactly as it was. Uses a runtime
+# capacity override instead of granting perk levels.
 func _run_self_test() -> void:
 	await get_tree().create_timer(3.0).timeout
-	_test_capacity = 2
+	_test_capacity = 99
 	ModLoaderLog.info("[selftest] capacity=%d pin_count=%d" % [capacity(), pin_count()], LOG_NAME)
 
-	var target: Control = null
-	for node: Node in get_tree().get_nodes_in_group("window"):
-		if node is Control and not node.get("closing"):
-			target = node
+	var source_connector: Control = null
+	var target_connector: Control = null
+	var windows: Array[Node] = get_tree().get_nodes_in_group("window")
+
+	for w: Node in windows:
+		if "containers" not in w or w.get("closing"):
+			continue
+		for c in w.get("containers"):
+			if not is_instance_valid(c):
+				continue
+			var out: Control = c.get_node_or_null("OutputConnector")
+			if out == null or out.get("disabled") or not out.is_visible_in_tree():
+				continue
+			for w2: Node in windows:
+				if w2 == w or "containers" not in w2 or w2.get("closing"):
+					continue
+				for c2 in w2.get("containers"):
+					if not is_instance_valid(c2):
+						continue
+					var inp: Control = c2.get_node_or_null("InputConnector")
+					if inp == null or inp.get("disabled") or not inp.is_visible_in_tree():
+						continue
+					if inp.call("has_connection"):
+						continue
+					if not inp.call("can_connect", c, Utils.connections_types.OUTPUT):
+						continue
+					source_connector = out
+					target_connector = inp
+					break
+				if target_connector != null:
+					break
+			if target_connector != null:
+				break
+		if target_connector != null:
 			break
 
-	if target == null:
-		ModLoaderLog.warning("[selftest] No window found on desktop, cannot test pinning.", LOG_NAME)
+	if source_connector == null or target_connector == null:
+		ModLoaderLog.warning("[selftest] No compatible unconnected connector pair found; skipping connection test.", LOG_NAME)
+		_test_capacity = 0
 		return
 
-	ModLoaderLog.info("[selftest] Pinning \"%s\"" % String(target.name), LOG_NAME)
-	pin(target)
-	ModLoaderLog.info("[selftest] is_pinned=%s pin_count=%d" % [str(is_pinned(target)), pin_count()], LOG_NAME)
-
-	await get_tree().create_timer(1.5).timeout
-
-	var view: Node = views.get(String(target.name))
-	if view != null and is_instance_valid(view):
-		var texture_size: Vector2 = view._viewport.get_texture().get_size()
-		ModLoaderLog.info("[selftest] title=\"%s\" pos=%s size=%s texture=%s zoom=%s opacity=%.2f" % [view._title.text, str(view.position), str(view.size), str(texture_size), str(view._camera.zoom), view.modulate.a], LOG_NAME)
-		ModLoaderLog.info("[selftest] interactive: gui_disable_input=%s container_filter=%d" % [str(view._viewport.gui_disable_input), view._vp_container.mouse_filter], LOG_NAME)
-		ModLoaderLog.info("[selftest] window tint=%s" % str(target.modulate), LOG_NAME)
-
-		view._on_color_pressed()
-		ModLoaderLog.info("[selftest] cycled color -> index=%d window tint=%s" % [view.color_index, str(target.modulate)], LOG_NAME)
-
-		view._on_settings_pressed()
-		view._scale_edit.text = "1.2"
-		view._on_scale_save()
-		await get_tree().create_timer(0.5).timeout
-		ModLoaderLog.info("[selftest] scale saved -> pin_scale=%.2f view size=%s" % [view.pin_scale, str(view.size)], LOG_NAME)
-
-		view.global_position = Vector2(80, 200)
-		ModLoaderLog.info("[selftest] dragged to pos=%s" % str(view.position), LOG_NAME)
-	else:
-		ModLoaderLog.warning("[selftest] Pin view missing after pin().", LOG_NAME)
-
+	var source_window := _window_ancestor_of(source_connector)
+	var target_window := _window_ancestor_of(target_connector)
+	var source_was_pinned := is_pinned(source_window)
+	var target_was_pinned := is_pinned(target_window)
+	pin(source_window)
+	pin(target_window)
 	await get_tree().create_timer(1.0).timeout
 
-	var tint_before_unpin: Color = target.modulate
-	unpin_by_key(String(target.name))
-	await get_tree().process_frame
-	ModLoaderLog.info("[selftest] After unpin: pin_count=%d window tint restored=%s (was %s)" % [pin_count(), str(target.modulate), str(tint_before_unpin)], LOG_NAME)
+	var view_a: Node = views.get(String(source_window.name))
+	var view_b: Node = views.get(String(target_window.name))
+	if view_a == null or view_b == null:
+		ModLoaderLog.warning("[selftest] Pin views missing, aborting.", LOG_NAME)
+		_test_capacity = 0
+		return
+
+	# Verify the view -> world coordinate mapping round-trips.
+	var out_center: Vector2 = source_connector.get_global_rect().get_center()
+	var viewport_size: Vector2 = Vector2(view_a._viewport.size)
+	var view_pos: Vector2 = (out_center - view_a._camera.global_position) * view_a._camera.zoom.x + viewport_size * 0.5
+	var mapping_error: float = view_a._view_to_world(view_pos).distance_to(out_center)
+	ModLoaderLog.info("[selftest] view->world mapping error: %.3f px" % mapping_error, LOG_NAME)
+
+	# Click the source node's OUTPUT through pin A.
+	var handled: bool = view_a._dispatch_world_click(out_center)
+	ModLoaderLog.info("[selftest] output click through pin A: handled=%s connecting=\"%s\" (expected \"%s\")" % [str(handled), Globals.connecting, source_connector.get("container").get("id")], LOG_NAME)
+
+	await get_tree().create_timer(0.5).timeout
+
+	# Click the target node's INPUT through pin B to complete the connection.
+	var in_center: Vector2 = target_connector.get_global_rect().get_center()
+	handled = view_b._dispatch_world_click(in_center)
+	await get_tree().create_timer(0.5).timeout
+
+	var source_id: String = source_connector.get("container").get("id")
+	var target_container = target_connector.get("container")
+	var target_id: String = target_container.get("id")
+	var connected: bool = target_container.get("input_id") == source_id
+	ModLoaderLog.info("[selftest] input click through pin B: handled=%s -> target input_id=\"%s\" (expected \"%s\")" % [str(handled), target_container.get("input_id"), source_id], LOG_NAME)
+
+	# Cleanup: remove the test connection and any test pins, reset state.
+	if connected:
+		Signals.delete_connection.emit(source_id, target_id)
+		await get_tree().create_timer(0.5).timeout
+		ModLoaderLog.info("[selftest] cleanup: connection deleted, target input_id=\"%s\"" % target_container.get("input_id"), LOG_NAME)
+	Globals.set_connecting("", 0)
+	if not source_was_pinned:
+		unpin_by_key(String(source_window.name))
+	if not target_was_pinned:
+		unpin_by_key(String(target_window.name))
 	_test_capacity = 0
-	ModLoaderLog.info("[selftest] COMPLETE", LOG_NAME)
+
+	if connected:
+		ModLoaderLog.info("[selftest] CONNECTION THROUGH PINS PASSED", LOG_NAME)
+	else:
+		ModLoaderLog.error("[selftest] CONNECTION THROUGH PINS FAILED", LOG_NAME)
+
+
+func _window_ancestor_of(node: Node) -> Control:
+	var current: Node = node
+	while current != null:
+		if current.is_in_group("window"):
+			return current
+		current = current.get_parent()
+	return null
 
 
 func _write_state() -> void:
