@@ -1,8 +1,10 @@
 extends Node
 
-# Owns the pin dock (a CanvasLayer that draws under the game HUD, since
+# Owns the pin layer (a CanvasLayer that draws under the game HUD, since
 # autoloads precede the Main scene in the tree) and the lifecycle of all
 # pinned node views. Pin capacity is gated by the "node_pins" perk level.
+# Pins are free-floating windows titled "Node Pin #N" that spawn at the
+# top-center of the screen and can be dragged anywhere.
 
 signal pins_changed
 
@@ -14,13 +16,13 @@ const STATE_PATH := "user://taylor_node_pins.json"
 const PinViewScript := preload("res://mods-unpacked/Taylor-NodePins/node_pins/pin_view.gd")
 
 var canvas: CanvasLayer
-var dock: VBoxContainer
+var pin_layer: Control
 var views: Dictionary = {}
 var saved_state: Dictionary = {}
 var restoring := false
 
 var default_opacity := 0.75
-var default_width := 300.0
+var default_scale := 0.6
 
 # Runtime-only capacity override used by the self-test; never persisted.
 var _test_capacity := 0
@@ -38,16 +40,11 @@ func _ready() -> void:
 	canvas.layer = 1
 	add_child(canvas)
 
-	dock = VBoxContainer.new()
-	dock.name = "PinDock"
-	dock.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	dock.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	dock.offset_top = 150.0
-	dock.offset_right = -12.0
-	dock.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	dock.grow_vertical = Control.GROW_DIRECTION_END
-	dock.add_theme_constant_override("separation", 10)
-	canvas.add_child(dock)
+	pin_layer = Control.new()
+	pin_layer.name = "PinLayer"
+	pin_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pin_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	canvas.add_child(pin_layer)
 
 	_write_timer = Timer.new()
 	_write_timer.one_shot = true
@@ -66,7 +63,7 @@ func _ready() -> void:
 	Signals.reboot.connect(_on_reboot)
 	Signals.desktop_ready.connect(_on_desktop_ready)
 
-	ModLoaderLog.info("Pin manager online (defaults: opacity %.2f, width %d)." % [default_opacity, int(default_width)], LOG_NAME)
+	ModLoaderLog.info("Pin manager online (defaults: opacity %.2f, scale %.2f)." % [default_opacity, default_scale], LOG_NAME)
 
 	if OS.get_environment("NODEPINS_SELFTEST") == "1":
 		ModLoaderLog.info("Self-test armed, waiting for desktop.", LOG_NAME)
@@ -105,22 +102,21 @@ func pin(window: Control, settings: Dictionary = {}) -> void:
 		Sound.play("error")
 		return
 
+	var merged := {
+		"opacity": default_opacity,
+		"scale": default_scale,
+	}
+	merged.merge(settings, true)
+
 	var view: PanelContainer = PinViewScript.new()
-	view.setup(
-		window,
-		self,
-		float(settings.get("opacity", default_opacity)),
-		float(settings.get("width", default_width))
-	)
-	dock.add_child(view)
+	view.setup(window, self, _next_pin_number(), merged)
+	pin_layer.add_child(view)
 	views[key] = view
 
 	if not restoring:
-		saved_state[key] = {"opacity": view.opacity, "width": view.view_width}
-		_schedule_write()
 		Sound.play("select")
 
-	ModLoaderLog.debug("Pinned \"%s\" (%d/%d slots)." % [key, pin_count(), capacity()], LOG_NAME)
+	ModLoaderLog.debug("Pinned \"%s\" as Node Pin #%d (%d/%d slots)." % [key, view.pin_number, pin_count(), capacity()], LOG_NAME)
 	pins_changed.emit()
 
 
@@ -151,9 +147,20 @@ func view_window_freed(key: String) -> void:
 	pins_changed.emit()
 
 
-func pin_settings_changed(key: String, opacity: float, width: float) -> void:
-	saved_state[key] = {"opacity": opacity, "width": width}
+func pin_settings_changed(key: String, settings: Dictionary) -> void:
+	saved_state[key] = settings
 	_schedule_write()
+
+
+func _next_pin_number() -> int:
+	var used: Array[int] = []
+	for view: Node in views.values():
+		if is_instance_valid(view):
+			used.append(int(view.pin_number))
+	var number := 1
+	while used.has(number):
+		number += 1
+	return number
 
 
 func _on_window_deleted(window: WindowContainer) -> void:
@@ -234,7 +241,7 @@ func _load_config() -> void:
 	var config: ModConfig = ModLoaderConfig.get_current_config(MOD_ID)
 	if config != null and not config.data.is_empty():
 		default_opacity = clampf(float(config.data.get("default_opacity", default_opacity)), 0.2, 1.0)
-		default_width = clampf(float(config.data.get("default_pin_width", default_width)), 180.0, 480.0)
+		default_scale = clampf(float(config.data.get("default_pin_scale", default_scale)), 0.2, 2.0)
 
 
 func _load_state() -> void:
@@ -277,18 +284,30 @@ func _run_self_test() -> void:
 	var view: Node = views.get(String(target.name))
 	if view != null and is_instance_valid(view):
 		var texture_size: Vector2 = view._viewport.get_texture().get_size()
-		ModLoaderLog.info("[selftest] Pin viewport texture size: %s, camera zoom: %s, view opacity: %.2f" % [str(texture_size), str(view._camera.zoom), view.modulate.a], LOG_NAME)
+		ModLoaderLog.info("[selftest] title=\"%s\" pos=%s size=%s texture=%s zoom=%s opacity=%.2f" % [view._title.text, str(view.position), str(view.size), str(texture_size), str(view._camera.zoom), view.modulate.a], LOG_NAME)
+		ModLoaderLog.info("[selftest] interactive: gui_disable_input=%s container_filter=%d" % [str(view._viewport.gui_disable_input), view._vp_container.mouse_filter], LOG_NAME)
+		ModLoaderLog.info("[selftest] window tint=%s" % str(target.modulate), LOG_NAME)
+
+		view._on_color_pressed()
+		ModLoaderLog.info("[selftest] cycled color -> index=%d window tint=%s" % [view.color_index, str(target.modulate)], LOG_NAME)
+
 		view._on_settings_pressed()
-		view._on_opacity_changed(0.5)
-		view._on_width_changed(360.0)
-		ModLoaderLog.info("[selftest] Applied settings: opacity=%.2f width=%d settings_visible=%s" % [view.opacity, int(view.view_width), str(view._settings_panel.visible)], LOG_NAME)
+		view._scale_edit.text = "1.2"
+		view._on_scale_save()
+		await get_tree().create_timer(0.5).timeout
+		ModLoaderLog.info("[selftest] scale saved -> pin_scale=%.2f view size=%s" % [view.pin_scale, str(view.size)], LOG_NAME)
+
+		view.global_position = Vector2(80, 200)
+		ModLoaderLog.info("[selftest] dragged to pos=%s" % str(view.position), LOG_NAME)
 	else:
 		ModLoaderLog.warning("[selftest] Pin view missing after pin().", LOG_NAME)
 
 	await get_tree().create_timer(1.0).timeout
 
+	var tint_before_unpin: Color = target.modulate
 	unpin_by_key(String(target.name))
-	ModLoaderLog.info("[selftest] After unpin: pin_count=%d" % pin_count(), LOG_NAME)
+	await get_tree().process_frame
+	ModLoaderLog.info("[selftest] After unpin: pin_count=%d window tint restored=%s (was %s)" % [pin_count(), str(target.modulate), str(tint_before_unpin)], LOG_NAME)
 	_test_capacity = 0
 	ModLoaderLog.info("[selftest] COMPLETE", LOG_NAME)
 

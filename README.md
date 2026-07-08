@@ -6,11 +6,13 @@ Pin your nodes to the screen. A gameplay mod for [Upload Labs](https://store.ste
 
 ## What it does
 
-- **Pin any node to your screen.** Select a node and press the new pin button (⚲) in the options bar. A live, translucent copy of the node stays fixed on your screen while you pan and zoom anywhere on the desktop — perfect for keeping an eye on a Reconstructor, Verifier, or breach across the map.
+- **Pin any node to your screen.** Select a node and press the new pin button (⚲) in the options bar. A live, translucent view of the node — titled **Node Pin #1**, **#2**, … — appears at the top-center of your screen and stays there while you pan and zoom anywhere on the desktop.
+- **Fully interactive.** Pins are not static pictures: clicks pass through into the real node, so you can work its inputs/outputs, connectors, and buttons directly inside the pin.
+- **Draggable.** Grab a pin by its header and place it anywhere on your screen; positions are remembered.
+- **Colorized nodes.** The pinned node itself is tinted a vibrant color in the world so it's easy to spot, and the pin's border matches. The 🎨 button cycles through six color choices per pin.
+- **Sized to the node.** Each pin scales relative to the node's own width and height with even padding. The ⚙ settings panel has an opacity slider and a **scale textbox** — type a value (0.2–2.0) and press the save button to apply.
 - **Unlocked through normal gameplay.** "Node Pins" appears as a standard token-cost upgrade in the token store (Nodes tab). Each level adds one pin slot: level 1 costs 4 tokens, and the price doubles per level (4 → 8 → 16 → 32 → 64, max 5 slots by default).
-- **Per-pin settings.** Every pinned node has its own ⚙ settings button that opens a small config panel with **opacity** (how transparent the pin is) and **size** (how large it renders) sliders, plus an ✕ button to unpin.
-- **Live view, not a screenshot.** Pins render the real node through a viewport that shares the game world — progress bars, resource counts, and animations all update in real time, even when the node is far off-screen (the mod keeps pinned nodes processing despite the game's off-screen optimizations).
-- **Pins persist.** Your pins and their settings are remembered across game sessions (matched by node identity, within your pin capacity).
+- **Live and persistent.** Pins render the real node through a viewport that shares the game world — progress bars and counts update in real time, even far off-screen (the mod keeps pinned nodes processing despite the game's off-screen optimizations). Pins, positions, colors, and settings survive game restarts.
 
 ## Installation
 
@@ -26,8 +28,8 @@ To uninstall, delete the ZIP. Saves stay fully compatible — the upgrade level 
 1. Reach a token income (the upgrade appears in the token store once you've passed the early game).
 2. Buy **Node Pins** in the token store → **Nodes** tab.
 3. Select any placed node — a pin button appears in the options bar next to pause.
-4. Click it. The node is now pinned to the right edge of your screen.
-5. Use the ⚙ on the pin for opacity/size, ✕ to unpin. Pin more nodes by buying more levels.
+4. Click it. The node is now pinned to the top-center of your screen, tinted so you can spot it in the world.
+5. Drag the pin by its header to place it. Use 🎨 to cycle its color, ⚙ for opacity and scale, ✕ to unpin. Pin more nodes by buying more levels.
 
 ## Configuration
 
@@ -39,7 +41,7 @@ After the first launch, `%APPDATA%\Upload Labs\mod_configs\Taylor-NodePins\defau
 | `perk_cost_growth` | `2` | Cost multiplier per level |
 | `perk_max_level` | `5` | Maximum pin slots purchasable |
 | `default_opacity` | `0.75` | Starting transparency of new pins |
-| `default_pin_width` | `300` | Starting on-screen width (px) of new pins |
+| `default_pin_scale` | `0.6` | Starting scale of new pins relative to the node's size (1 = actual size) |
 
 ## How it works
 

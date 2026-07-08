@@ -32,7 +32,7 @@ func _np_inject_perk() -> void:
 	perks[NP_PERK_ID] = {
 		"name": "Node Pins",
 		"icon": "tether",
-		"description": "Pin nodes to your screen as translucent overlays that stay visible while you pan around the desktop. Each level adds one pin slot. Select a node and press the pin button in the options bar.",
+		"description": "Pin nodes to your screen as translucent overlays that stay visible while you pan around the desktop.",
 		"type": 0,
 		"limit": max_level,
 		"currency": "token",
