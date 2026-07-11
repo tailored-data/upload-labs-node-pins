@@ -11,6 +11,7 @@ signal pins_changed
 const MOD_ID := "Taylor-NodePins"
 const LOG_NAME := MOD_ID + ":Manager"
 const PERK_ID := "node_pins"
+const SLOTS_PERK_ID := "node_pins_slots"
 const STATE_PATH := "user://taylor_node_pins.json"
 
 const PinViewScript := preload("res://mods-unpacked/Taylor-NodePins/node_pins/pin_view.gd")
@@ -71,7 +72,19 @@ func _ready() -> void:
 
 
 func capacity() -> int:
-	return maxi(int(Globals.perks.get(PERK_ID, 0)), _test_capacity)
+	var owned: int = int(Globals.perks.get(PERK_ID, 0)) + int(Globals.perks.get(SLOTS_PERK_ID, 0))
+	return maxi(owned, _test_capacity)
+
+
+# Used by the desktop script extension to remap connection drags/drops
+# that happen over a pin.
+func pin_view_at_screen_point(point: Vector2) -> Control:
+	if not canvas.visible:
+		return null
+	for view: Node in views.values():
+		if is_instance_valid(view) and view.call("view_contains_screen_point", point):
+			return view
+	return null
 
 
 func pin_count() -> int:
@@ -128,7 +141,7 @@ func unpin_by_key(key: String) -> void:
 	var view: Node = views[key]
 	views.erase(key)
 	if is_instance_valid(view):
-		view.queue_free()
+		view.call("play_outro")
 	saved_state.erase(key)
 	_schedule_write()
 	if not restoring:
@@ -145,7 +158,7 @@ func view_window_freed(key: String) -> void:
 	var view: Node = views[key]
 	views.erase(key)
 	if is_instance_valid(view):
-		view.queue_free()
+		view.call("play_outro")
 	pins_changed.emit()
 
 
@@ -349,6 +362,12 @@ func _run_self_test() -> void:
 	var target_id: String = target_container.get("id")
 	var connected: bool = target_container.get("input_id") == source_id
 	ModLoaderLog.info("[selftest] input click through pin B: handled=%s -> target input_id=\"%s\" (expected \"%s\")" % [str(handled), target_container.get("input_id"), source_id], LOG_NAME)
+
+	# Verify the auto-connect resolver picks the same target when dropping
+	# anywhere on pin B (used by the desktop extension for dragged drops).
+	var auto: Control = Globals.desktop.call("_np_auto_connector", view_b, source_id, Utils.connections_types.OUTPUT)
+	var auto_id: String = auto.get("container").get("id") if auto != null else "null"
+	ModLoaderLog.info("[selftest] auto-connect on pin B resolves to container \"%s\" (target was \"%s\")" % [auto_id, target_id], LOG_NAME)
 
 	# Cleanup: remove the test connection and any test pins, reset state.
 	if connected:

@@ -13,6 +13,8 @@ func _init() -> void:
 
 	ModLoaderMod.install_script_extension(extensions_dir_path.path_join("scripts/data.gd"))
 	ModLoaderMod.install_script_extension(extensions_dir_path.path_join("scripts/options_bar.gd"))
+	ModLoaderMod.install_script_extension(extensions_dir_path.path_join("scripts/desktop.gd"))
+	ModLoaderMod.install_script_extension(extensions_dir_path.path_join("scenes/perk_panel.gd"))
 
 
 func _ready() -> void:

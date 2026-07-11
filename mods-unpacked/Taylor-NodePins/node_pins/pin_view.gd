@@ -2,19 +2,21 @@ extends PanelContainer
 
 # One pinned node: an interactive live view of the real window rendered
 # through a SubViewport that shares the main World2D, with its own camera
-# locked to the window. Input over the view is forwarded into the shared
-# world, so the node's inputs/outputs stay fully usable while pinned.
+# locked to the window. Clicks and connection drags over the view are
+# translated into world coordinates and applied to the real node.
 #
-# The pin window is draggable by its header, titled "Node Pin #N", tints
-# the real node with a cycleable vibrant color, and sizes itself relative
-# to the node's own dimensions (the global default_pin_scale config value
-# x node size, plus padding). The settings (cog) panel adjusts opacity.
+# The pin window is draggable by its header, resizable by its bottom-right
+# corner, titled "Node Pin #N", and marks the real node with a colored
+# border frame (cycleable via the palette button). The settings (cog)
+# panel adjusts opacity and render zoom (hard-limited).
 
 const MIN_OPACITY := 0.2
 const MAX_OPACITY := 1.0
-const MIN_SCALE := 0.2
-const MAX_SCALE := 2.0
+const MIN_ZOOM := 0.15
+const MAX_ZOOM := 1.5
 const PADDING := 16.0
+const RESIZE_GRAB := 26.0
+const MIN_VIEW_SIZE := Vector2(160.0, 120.0)
 const HEADER_ICON_SIZE := Vector2(26, 26)
 
 const PIN_COLORS: Array[Color] = [
@@ -33,6 +35,8 @@ var pin_number := 1
 var opacity := 0.75
 var pin_scale := 0.6
 var color_index := 0
+var view_size := Vector2.ZERO
+var view_zoom := 0.0
 
 var _viewport: SubViewport
 var _camera: Camera2D
@@ -40,9 +44,16 @@ var _vp_container: SubViewportContainer
 var _title: Label
 var _settings_panel: PanelContainer
 var _panel_style: StyleBoxFlat
+var _frame: Panel
+var _frame_style: StyleBoxFlat
 var _saved_position := Vector2.INF
 var _dragging := false
 var _drag_offset := Vector2.ZERO
+var _resizing := false
+var _resize_start_mouse := Vector2.ZERO
+var _resize_start_size := Vector2.ZERO
+var _pin_connecting := false
+var _closing := false
 
 
 func setup(p_window: Control, p_manager: Node, p_number: int, settings: Dictionary = {}) -> void:
@@ -51,8 +62,12 @@ func setup(p_window: Control, p_manager: Node, p_number: int, settings: Dictiona
 	window_key = String(p_window.name)
 	pin_number = p_number
 	opacity = clampf(float(settings.get("opacity", opacity)), MIN_OPACITY, MAX_OPACITY)
-	pin_scale = clampf(float(settings.get("scale", pin_scale)), MIN_SCALE, MAX_SCALE)
+	pin_scale = clampf(float(settings.get("scale", pin_scale)), 0.2, 2.0)
 	color_index = clampi(int(settings.get("color", 0)), 0, PIN_COLORS.size() - 1)
+	if settings.has("w") and settings.has("h"):
+		view_size = Vector2(float(settings.w), float(settings.h))
+	if settings.has("zoom"):
+		view_zoom = clampf(float(settings.zoom), MIN_ZOOM, MAX_ZOOM)
 	if settings.has("x") and settings.has("y"):
 		_saved_position = Vector2(float(settings.x), float(settings.y))
 
@@ -63,22 +78,29 @@ func get_settings() -> Dictionary:
 		"color": color_index,
 		"x": position.x,
 		"y": position.y,
+		"w": view_size.x,
+		"h": view_size.y,
+		"zoom": view_zoom,
 	}
 
 
 func _ready() -> void:
 	name = "Pin" + str(pin_number)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	gui_input.connect(_on_panel_gui_input)
 
 	_panel_style = StyleBoxFlat.new()
 	_panel_style.bg_color = Color(0.098, 0.122, 0.169, 0.92)
 	_panel_style.set_corner_radius_all(10)
 	_panel_style.set_content_margin_all(8)
+	_panel_style.content_margin_bottom = 14.0
+	_panel_style.content_margin_right = 14.0
 	_panel_style.set_border_width_all(2)
 	add_theme_stylebox_override("panel", _panel_style)
 
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 6)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 
 	var header := PanelContainer.new()
@@ -141,7 +163,14 @@ func _ready() -> void:
 	settings_box.add_theme_constant_override("separation", 6)
 	_settings_panel.add_child(settings_box)
 
-	settings_box.add_child(_make_opacity_row())
+	settings_box.add_child(_make_slider_row(
+		"res://textures/icons/eye_ball.png", "Opacity",
+		MIN_OPACITY, MAX_OPACITY, 0.05, opacity, _on_opacity_changed
+	))
+	settings_box.add_child(_make_slider_row(
+		"res://textures/icons/zoom_in.png", "Zoom",
+		MIN_ZOOM, MAX_ZOOM, 0.05, maxf(view_zoom, MIN_ZOOM), _on_zoom_changed
+	))
 
 	_vp_container = SubViewportContainer.new()
 	_vp_container.stretch = true
@@ -164,33 +193,53 @@ func _ready() -> void:
 	_camera = Camera2D.new()
 	_viewport.add_child(_camera)
 
-	modulate.a = opacity
+	_init_view_defaults()
+	_vp_container.custom_minimum_size = view_size
+	_create_frame()
 	_apply_color()
-	_update_layout(true)
+	modulate.a = 0.0
 	_init_position.call_deferred()
 
 
 func _exit_tree() -> void:
-	# Return the node to its vanilla tint when the pin goes away.
-	if is_instance_valid(window):
-		window.modulate = window.call("get_color")
+	_remove_frame()
 
 
 func _process(delta: float) -> void:
 	if not is_instance_valid(window) or window.is_queued_for_deletion():
 		set_process(false)
+		_remove_frame()
 		manager.call("view_window_freed", window_key)
 		return
 
-	_update_layout(false)
 	_update_camera()
-	_apply_window_tint()
+	_update_frame()
+	_update_resize_cursor()
+
+
+# Initial frame size derives from the node's own dimensions (scaled, with
+# padding); the initial zoom fits the node inside that frame. Both are
+# free afterwards: the user resizes the frame and zooms independently.
+func _init_view_defaults() -> void:
+	var world_size := _window_world_size()
+	if view_size == Vector2.ZERO:
+		view_size = world_size * pin_scale + Vector2(PADDING, PADDING) * 2.0
+	view_size = _clamp_view_size(view_size)
+
+	if view_zoom <= 0.0:
+		view_zoom = minf(
+			(view_size.x - PADDING * 2.0) / world_size.x,
+			(view_size.y - PADDING * 2.0) / world_size.y
+		)
+	view_zoom = clampf(view_zoom, MIN_ZOOM, MAX_ZOOM)
+
+
+func _clamp_view_size(desired: Vector2) -> Vector2:
+	var max_size := get_viewport_rect().size * 0.55
+	return desired.clamp(MIN_VIEW_SIZE, max_size.max(MIN_VIEW_SIZE))
 
 
 func _init_position() -> void:
-	# Runs one frame after _ready so the container layout has resolved and
-	# our size is known. New pins appear at the top-center of the screen;
-	# restored pins return to where the player left them.
 	await get_tree().process_frame
 	var viewport_size := get_viewport_rect().size
 	if _saved_position != Vector2.INF:
@@ -202,7 +251,74 @@ func _init_position() -> void:
 		)
 	_clamp_to_screen()
 	manager.call("pin_settings_changed", window_key, get_settings())
+	_play_intro()
 
+
+# --- Animations -------------------------------------------------------
+
+func _play_intro() -> void:
+	# "Fade-in slam": starts oversized and transparent, slams down to size.
+	pivot_offset = size / 2.0
+	scale = Vector2(1.35, 1.35)
+	var tween := create_tween()
+	tween.set_parallel()
+	tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "scale", Vector2.ONE, 0.22)
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "modulate:a", opacity, 0.18)
+
+
+func play_outro() -> void:
+	# "Fade-out peel": rotates off its bottom-left corner while fading.
+	if _closing:
+		return
+	_closing = true
+	set_process(false)
+	_remove_frame()
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pivot_offset = Vector2(0.0, size.y)
+	var tween := create_tween()
+	tween.set_parallel()
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_property(self, "rotation_degrees", -14.0, 0.22)
+	tween.tween_property(self, "scale", Vector2(0.7, 0.7), 0.22)
+	tween.tween_property(self, "modulate:a", 0.0, 0.22)
+	tween.chain().tween_callback(queue_free)
+
+
+# --- Node frame (colored border on the real node) ----------------------
+
+func _create_frame() -> void:
+	if not is_instance_valid(window):
+		return
+	_frame = Panel.new()
+	_frame.name = "NodePinFrame_" + window_key
+	_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_frame.z_index = 1
+	_frame_style = StyleBoxFlat.new()
+	_frame_style.draw_center = false
+	_frame_style.set_border_width_all(6)
+	_frame_style.set_corner_radius_all(14)
+	_frame_style.set_expand_margin_all(6.0)
+	_frame.add_theme_stylebox_override("panel", _frame_style)
+	window.get_parent().add_child(_frame)
+	_update_frame()
+
+
+func _update_frame() -> void:
+	if _frame == null or not is_instance_valid(_frame) or not is_instance_valid(window):
+		return
+	_frame.global_position = window.global_position
+	_frame.size = _window_world_size()
+
+
+func _remove_frame() -> void:
+	if _frame != null and is_instance_valid(_frame):
+		_frame.queue_free()
+	_frame = null
+
+
+# --- Layout / camera ----------------------------------------------------
 
 func _window_world_size() -> Vector2:
 	var height := 0.0
@@ -215,63 +331,68 @@ func _window_world_size() -> Vector2:
 	return Vector2(maxf(window.size.x, 100.0), maxf(height, 100.0))
 
 
-func _update_layout(force: bool) -> void:
-	# The pin view scales with the node itself: node size x pin_scale,
-	# plus even padding, clamped so huge nodes cannot flood the screen.
-	var world_size := _window_world_size()
-	var desired := world_size * pin_scale + Vector2(PADDING, PADDING) * 2.0
-	var max_size := get_viewport_rect().size * 0.45
-	desired = desired.clamp(Vector2(140, 100), max_size)
-
-	if force or (desired - _vp_container.custom_minimum_size).length() > 3.0:
-		_vp_container.custom_minimum_size = desired
-		reset_size()
-
-
 func _update_camera() -> void:
-	var world_size := _window_world_size()
-	_camera.global_position = window.global_position + world_size * 0.5
-
-	var viewport_size := Vector2(_viewport.size)
-	if viewport_size.x < 1.0 or viewport_size.y < 1.0:
-		return
-	var zoom_factor := minf(
-		(viewport_size.x - PADDING * 2.0) / world_size.x,
-		(viewport_size.y - PADDING * 2.0) / world_size.y
-	)
-	zoom_factor = maxf(zoom_factor, 0.01)
-	_camera.zoom = Vector2(zoom_factor, zoom_factor)
+	_camera.global_position = window.global_position + _window_world_size() * 0.5
+	_camera.zoom = Vector2(view_zoom, view_zoom)
 
 
-func _apply_color() -> void:
-	var tint := PIN_COLORS[color_index]
-	_panel_style.border_color = tint
-	_apply_window_tint()
-
-
-func _apply_window_tint() -> void:
-	if is_instance_valid(window):
-		var base: Color = window.call("get_color")
-		window.modulate = base * PIN_COLORS[color_index]
-
-
-func _clamp_to_screen() -> void:
-	var viewport_size := get_viewport_rect().size
-	position = position.clamp(Vector2.ZERO, (viewport_size - size).max(Vector2.ZERO))
-
-
-# --- Interaction: clicks on the pin are mapped into the world and applied
-# --- to the real node, so connections can be made through the pin.
+# --- Interaction: clicks and connection drags over the view are mapped
+# --- into the world and applied to the real node.
 
 func _on_view_gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		if _dispatch_world_click(_view_to_world(event.position)):
-			accept_event()
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if not event.pressed:
+			if _pin_connecting:
+				_finish_pin_drag()
+				accept_event()
+			elif _dispatch_world_click(_view_to_world(event.position)):
+				accept_event()
+	elif event is InputEventMouseMotion and event.button_mask == MOUSE_BUTTON_MASK_LEFT:
+		if not _pin_connecting and Globals.connecting.is_empty():
+			_try_start_pin_drag(event.position - event.relative)
+
+
+# Dragging out of a connector inside the pin starts a connection, exactly
+# like dragging a connector in the world.
+func _try_start_pin_drag(view_pos: Vector2) -> void:
+	var connector: Control = _find_connector_at(_view_to_world(view_pos))
+	if connector == null:
+		return
+	var container = connector.get("container")
+	if connector.get("type") == Utils.connections_types.INPUT and connector.call("has_connection"):
+		Signals.delete_connection.emit(container.get("input_id"), container.get("id"))
+	Globals.set_connecting(container.get("id"), connector.get("type"))
+	Sound.play("connector")
+	_pin_connecting = true
+
+
+# Releasing a pin-started connection drops it at the world point under the
+# cursor: inside this or another pin the desktop extension remaps it, and
+# out in the open world it resolves against the main camera view.
+func _finish_pin_drag() -> void:
+	_pin_connecting = false
+	if Globals.connecting.is_empty():
+		return
+	var screen_size := get_viewport_rect().size
+	var mouse_screen := get_viewport().get_mouse_position()
+	var world_at: Vector2 = Globals.camera_center + (mouse_screen - screen_size * 0.5) / Globals.camera_zoom.x
+	var connecting_id: String = Globals.connecting
+	var connecting_type: int = Globals.connection_type
+	Signals.connection_droppped.emit(connecting_id, connecting_type, world_at)
+	Globals.set_connecting("", 0)
 
 
 func _view_to_world(view_pos: Vector2) -> Vector2:
 	var viewport_size := Vector2(_viewport.size)
 	return _camera.global_position + (view_pos - viewport_size * 0.5) / _camera.zoom.x
+
+
+func mouse_to_world() -> Vector2:
+	return _view_to_world(_vp_container.get_local_mouse_position())
+
+
+func view_contains_screen_point(point: Vector2) -> bool:
+	return _vp_container.get_global_rect().has_point(point)
 
 
 # Applies a click at the given world point to the pinned node. Connector
@@ -344,6 +465,8 @@ func _find_button_at(world_point: Vector2) -> BaseButton:
 	return best
 
 
+# --- Drag (header) and resize (bottom-right corner) ---------------------
+
 func _on_header_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
@@ -357,6 +480,45 @@ func _on_header_gui_input(event: InputEvent) -> void:
 		global_position = get_global_mouse_position() - _drag_offset
 
 
+func _on_panel_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed and _in_resize_corner(event.position):
+			_resizing = true
+			_resize_start_mouse = get_global_mouse_position()
+			_resize_start_size = view_size
+			accept_event()
+		elif not event.pressed and _resizing:
+			_resizing = false
+			_clamp_to_screen()
+			manager.call("pin_settings_changed", window_key, get_settings())
+			accept_event()
+	elif event is InputEventMouseMotion and _resizing:
+		var delta := get_global_mouse_position() - _resize_start_mouse
+		view_size = _clamp_view_size(_resize_start_size + delta)
+		_vp_container.custom_minimum_size = view_size
+		reset_size()
+
+
+func _in_resize_corner(local_pos: Vector2) -> bool:
+	return local_pos.x > size.x - RESIZE_GRAB and local_pos.y > size.y - RESIZE_GRAB
+
+
+func _update_resize_cursor() -> void:
+	if _resizing:
+		return
+	if _in_resize_corner(get_local_mouse_position()):
+		mouse_default_cursor_shape = Control.CURSOR_FDIAGSIZE
+	else:
+		mouse_default_cursor_shape = Control.CURSOR_ARROW
+
+
+func _clamp_to_screen() -> void:
+	var viewport_size := get_viewport_rect().size
+	position = position.clamp(Vector2.ZERO, (viewport_size - size).max(Vector2.ZERO))
+
+
+# --- UI construction and settings ---------------------------------------
+
 func _make_icon_button(icon_path: String) -> Button:
 	var button := Button.new()
 	button.flat = true
@@ -367,36 +529,48 @@ func _make_icon_button(icon_path: String) -> Button:
 	return button
 
 
-func _make_opacity_row() -> HBoxContainer:
+func _make_slider_row(icon_path: String, tooltip: String, min_value: float, max_value: float, step: float, value: float, callback: Callable) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 
 	var icon := TextureRect.new()
-	icon.texture = load("res://textures/icons/eye_ball.png")
+	icon.texture = load(icon_path)
 	icon.custom_minimum_size = Vector2(20, 20)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.tooltip_text = "Opacity"
+	icon.tooltip_text = tooltip
 	row.add_child(icon)
 
 	var slider := HSlider.new()
-	slider.min_value = MIN_OPACITY
-	slider.max_value = MAX_OPACITY
-	slider.step = 0.05
-	slider.value = opacity
+	slider.min_value = min_value
+	slider.max_value = max_value
+	slider.step = step
+	slider.value = value
 	slider.custom_minimum_size = Vector2(150, 18)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	slider.focus_mode = Control.FOCUS_NONE
-	slider.value_changed.connect(_on_opacity_changed)
+	slider.value_changed.connect(callback)
 	row.add_child(slider)
 
 	return row
 
 
+func _apply_color() -> void:
+	var tint := PIN_COLORS[color_index]
+	_panel_style.border_color = tint
+	if _frame_style != null:
+		_frame_style.border_color = tint
+
+
 func _on_opacity_changed(value: float) -> void:
 	opacity = clampf(value, MIN_OPACITY, MAX_OPACITY)
 	modulate.a = opacity
+	manager.call("pin_settings_changed", window_key, get_settings())
+
+
+func _on_zoom_changed(value: float) -> void:
+	view_zoom = clampf(value, MIN_ZOOM, MAX_ZOOM)
 	manager.call("pin_settings_changed", window_key, get_settings())
 
 

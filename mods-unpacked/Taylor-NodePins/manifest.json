@@ -1,8 +1,8 @@
 {
 	"name": "NodePins",
 	"namespace": "Taylor",
-	"version_number": "1.3.0",
-	"description": "Pin nodes to your screen as interactive, translucent live overlays that stay visible while you pan the desktop. Unlocked through a token-cost upgrade; each level adds a pin slot. Pins are draggable, colorized, and have per-pin opacity and scale settings.",
+	"version_number": "1.4.0",
+	"description": "Pin nodes to your screen as interactive, translucent live overlays that stay visible while you pan the desktop. Drag connections straight onto pins. Unlocked through token-cost upgrades (plus research-cost extra slots). Pins are draggable, resizable, zoomable, and mark the node with a colored frame.",
 	"website_url": "https://github.com/tailored-data/upload-labs-node-pins",
 	"dependencies": [],
 	"extra": {
@@ -15,30 +15,6 @@
 				"title": "Node Pins",
 				"type": "object",
 				"properties": {
-					"perk_base_cost": {
-						"title": "Upgrade base cost (tokens)",
-						"description": "Token cost of the first Node Pins upgrade level.",
-						"type": "number",
-						"default": 4,
-						"minimum": 1,
-						"maximum": 1000
-					},
-					"perk_cost_growth": {
-						"title": "Upgrade cost growth",
-						"description": "Cost multiplier per level. 2 doubles the price each level.",
-						"type": "number",
-						"default": 2,
-						"minimum": 1,
-						"maximum": 10
-					},
-					"perk_max_level": {
-						"title": "Maximum upgrade level",
-						"description": "Maximum pin slots purchasable.",
-						"type": "number",
-						"default": 5,
-						"minimum": 1,
-						"maximum": 20
-					},
 					"default_opacity": {
 						"title": "Default pin opacity",
 						"description": "Starting transparency of newly pinned nodes (0.2 = very transparent, 1 = opaque).",

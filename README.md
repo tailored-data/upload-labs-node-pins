@@ -7,13 +7,12 @@ Steam Workshop: [Node Pins (QoL) - https://steamcommunity.com/sharedfiles/filede
 ## Features
 
 - **Pin any node to your screen.** Select a node and press the pin button (⚲) in the options bar. A live, translucent view of the node — titled **Node Pin #1**, **#2**, … — appears at the top-center of your screen and stays there while you pan and zoom anywhere on the desktop.
-- **Fully interactive.** Pins are not static pictures: clicks inside a pin are mapped into the world and applied to the real node. Click an output connector on a node you're looking at, then click the input connector **inside the pin** (or vice versa) to connect them — no more scrolling back and forth between distant nodes. Compatible connectors glow inside the pin while you're connecting, and regular buttons on the node work through the pin too.
-- **Draggable.** Grab a pin by its header and place it anywhere on your screen. Positions are remembered.
-- **Colorized nodes.** The pinned node is tinted a vibrant color in the world so it's easy to spot, and the pin's border matches. The 🎨 button cycles through six colors per pin.
-- **Sized to the node.** Each pin automatically scales relative to the node's own width and height, with even padding, so small nodes make small pins and large nodes stay readable.
-- **Per-pin opacity.** The ⚙ button opens a settings panel with an opacity slider, and the ✕ button unpins.
-- **Unlocked through normal gameplay.** "Node Pins" appears as a standard token-cost upgrade in the token store (Nodes tab). Each level adds one pin slot: level 1 costs 4 tokens and the price doubles per level (4 → 8 → 16 → 32 → 64, max 5 slots by default).
-- **Live and persistent.** Pins render the real node through a viewport that shares the game world — progress bars and counts update in real time, even far off-screen (the mod keeps pinned nodes processing despite the game's off-screen optimizations). Pins, positions, colors, and opacity survive game restarts.
+- **Fully interactive — click or drag.** Clicks inside a pin are mapped into the world and applied to the real node, and **connection drags work too**: drag from any connector straight onto a pin (or from a pin's connector out into the world) and it connects. Dropping anywhere on a pin's frame **auto-connects** to the best compatible endpoint of that node. Compatible connectors glow inside the pin while connecting, and regular buttons on the node work through the pin.
+- **Draggable and resizable.** Grab a pin by its header to move it; drag its bottom-right corner to resize the frame. The ⚙ settings panel has **opacity** and **zoom** sliders — zoom in or out on the node rendered inside the frame (hard-limited to a sane range). Everything is remembered per pin.
+- **Framed nodes.** The pinned node gets a vibrant colored border frame in the world so it's easy to spot — only the frame is colored, never the node's contents — and the pin's border matches. The 🎨 button cycles through six colors.
+- **Unlocked through normal gameplay.** "Node Pins" is a token-cost upgrade in the token store (Nodes tab): 5 pin slots costing 10, 20, 20, 30, 50 tokens. A second upgrade, **Extra Pin Slots**, adds up to 3 more slots (8 absolute max) at exponentially increasing Research costs starting at 1.0T (1T → 10T → 100T).
+- **Animated.** Pins slam in when created and peel away when removed.
+- **Live and persistent.** Pins render the real node through a viewport that shares the game world — progress bars and counts update in real time, even far off-screen (the mod keeps pinned nodes processing despite the game's off-screen optimizations). Pins, positions, sizes, zoom, colors, and opacity survive game restarts.
 
 ## Installation
 
@@ -32,11 +31,11 @@ The game's mod loader also loads mods subscribed via the Steam Workshop. If you 
 
 ## Usage
 
-1. Buy **Node Pins** in the token store → **Nodes** tab (it appears once you've passed the early game).
+1. Buy **Node Pins** in the token store → **Nodes** tab (it appears once you've passed the early game). Buy **Extra Pin Slots** with Research later for up to 3 more.
 2. Select any placed node — a pin button (⚲) appears in the options bar next to pause.
-3. Click it. The node is pinned to the top-center of your screen and tinted so you can spot it in the world.
-4. Drag the pin by its header to place it. Use 🎨 to cycle its color, ⚙ for opacity, ✕ to unpin.
-5. To connect across the map: click one node's output connector, then click the other node's input connector inside its pin — or start from the pin and finish in the world.
+3. Click it. The node slams onto the top-center of your screen and gets a colored frame so you can spot it in the world.
+4. Drag the pin by its header to place it; drag its bottom-right corner to resize. Use 🎨 to cycle its color, ⚙ for opacity/zoom, ✕ to unpin.
+5. To connect across the map: drag (or click) a connection from any node and drop it on the pin — landing anywhere on the pin auto-connects to the best matching endpoint, or hit a specific connector for full control. Works in both directions.
 
 ## Configuration
 
@@ -44,11 +43,8 @@ After the first launch, edit `%APPDATA%\Upload Labs\mod_configs\Taylor-NodePins\
 
 | Key | Default | Meaning |
 |---|---|---|
-| `perk_base_cost` | `4` | Token cost of upgrade level 1 |
-| `perk_cost_growth` | `2` | Cost multiplier per level |
-| `perk_max_level` | `5` | Maximum pin slots purchasable |
 | `default_opacity` | `0.75` | Starting transparency of new pins (0.2–1) |
-| `default_pin_scale` | `0.6` | Size of pins relative to the node's own size (1 = actual size) |
+| `default_pin_scale` | `0.6` | Initial size of new pins relative to the node's own size (resizable afterwards) |
 
 ## Repository layout
 
