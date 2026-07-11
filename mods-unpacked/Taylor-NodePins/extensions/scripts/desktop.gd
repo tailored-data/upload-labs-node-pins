@@ -12,8 +12,13 @@ extends "res://scripts/desktop.gd"
 # connector of the pinned node.
 
 
+# Set by the self-test: remapping keys off the physical mouse position,
+# which is meaningless for synthesized test clicks.
+var np_skip_remap := false
+
+
 func _on_connection_dropped(connection: String, type: int, at: Vector2) -> void:
-	var pin_view: Control = _np_pin_under_mouse()
+	var pin_view: Control = null if np_skip_remap else _np_pin_under_mouse()
 	if pin_view == null:
 		super(connection, type, at)
 		return
@@ -37,7 +42,7 @@ func _on_connection_dropped(connection: String, type: int, at: Vector2) -> void:
 
 
 func _on_connection_dragged(connection: String, type: int, at: Vector2) -> void:
-	var pin_view: Control = _np_pin_under_mouse()
+	var pin_view: Control = null if np_skip_remap else _np_pin_under_mouse()
 	if pin_view != null:
 		at = pin_view.call("mouse_to_world")
 	super(connection, type, at)

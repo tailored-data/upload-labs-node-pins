@@ -6,7 +6,7 @@ param(
 )
 
 $root = $PSScriptRoot
-$src = Join-Path $root "mods-unpacked"
+$src = Join-Path $root "mods-unpacked\Taylor-NodePins"
 $dest = Join-Path $root ("Taylor-NodePins-{0}.zip" -f $Version)
 
 if (Test-Path $dest) { Remove-Item $dest -Force -Confirm:$false }
@@ -14,7 +14,7 @@ if (Test-Path $dest) { Remove-Item $dest -Force -Confirm:$false }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($dest, 'Create')
 Get-ChildItem $src -Recurse -File | ForEach-Object {
-    $rel = "mods-unpacked/" + $_.FullName.Substring($src.Length + 1).Replace('\', '/')
+    $rel = "mods-unpacked/Taylor-NodePins/" + $_.FullName.Substring($src.Length + 1).Replace('\', '/')
     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $rel) | Out-Null
 }
 $zip.Dispose()

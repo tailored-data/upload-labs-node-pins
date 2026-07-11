@@ -55,11 +55,16 @@ mods-unpacked/
     mod_main.gd           <- entry point; installs the script extensions
     extensions/
       scripts/
-        data.gd           <- injects the "node_pins" perk into the token store
+        data.gd           <- injects the Node Pins perks into the token store
         options_bar.gd    <- adds the pin button to the node options bar
+        desktop.gd        <- remaps connection drags/drops over pins; auto-connect
+      scenes/
+        perk_panel.gd     <- fixed per-level token costs (10/20/20/30/50)
     node_pins/
       pin_manager.gd      <- pin lifecycle, capacity, persistence, self-test
-      pin_view.gd         <- one pin window: live view, drag, color, settings
+      pin_view.gd         <- one pin window: live view, drag, resize, zoom, color
+  preview.png             <- Workshop preview art (not part of the mod ZIP)
+workshop_release/         <- content folder used for Steam Workshop uploads
 build_zip.ps1             <- build helper (see below), NOT part of the mod
 README.md / LICENSE
 ```
@@ -69,7 +74,7 @@ README.md / LICENSE
 This PowerShell script is a **build tool only** — it is never included in the released ZIP and never runs on players' machines. It exists because PowerShell's built-in `Compress-Archive` writes Windows-style backslash paths inside ZIP files, which Godot's ZIP reader cannot resolve; the script zips `mods-unpacked/` with proper forward-slash entries instead. You can read it — it's ~20 lines. To build from source:
 
 ```powershell
-./build_zip.ps1 -Version 1.3.0    # produces Taylor-NodePins-1.3.0.zip
+./build_zip.ps1 -Version 1.4.0    # produces Taylor-NodePins-1.4.0.zip
 ```
 
 The `mods-unpacked/<Namespace>-<ModName>/` layout inside the ZIP is the structure the Godot Mod Loader requires, and it is the same ZIP that gets uploaded as a Steam Workshop item — the loader scans subscribed workshop content for exactly this kind of archive.

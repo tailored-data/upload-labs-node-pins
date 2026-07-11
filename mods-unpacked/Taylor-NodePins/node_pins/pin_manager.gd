@@ -346,6 +346,10 @@ func _run_self_test() -> void:
 	var mapping_error: float = view_a._view_to_world(view_pos).distance_to(out_center)
 	ModLoaderLog.info("[selftest] view->world mapping error: %.3f px" % mapping_error, LOG_NAME)
 
+	# Synthesized test clicks carry exact world positions; the physical
+	# mouse is wherever the user left it, so disable mouse-based remapping.
+	Globals.desktop.set("np_skip_remap", true)
+
 	# Click the source node's OUTPUT through pin A.
 	var handled: bool = view_a._dispatch_world_click(out_center)
 	ModLoaderLog.info("[selftest] output click through pin A: handled=%s connecting=\"%s\" (expected \"%s\")" % [str(handled), Globals.connecting, source_connector.get("container").get("id")], LOG_NAME)
@@ -374,6 +378,7 @@ func _run_self_test() -> void:
 		Signals.delete_connection.emit(source_id, target_id)
 		await get_tree().create_timer(0.5).timeout
 		ModLoaderLog.info("[selftest] cleanup: connection deleted, target input_id=\"%s\"" % target_container.get("input_id"), LOG_NAME)
+	Globals.desktop.set("np_skip_remap", false)
 	Globals.set_connecting("", 0)
 	if not source_was_pinned:
 		unpin_by_key(String(source_window.name))
