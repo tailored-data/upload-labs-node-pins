@@ -16,6 +16,16 @@ extends "res://scripts/desktop.gd"
 # which is meaningless for synthesized test clicks.
 var np_skip_remap := false
 
+# Visibility layer used to keep the zoomed-out LOD icon overlay out of
+# pin views: pins render only layer 1, the main viewport renders all.
+const NP_LOD_LAYER := 1 << 19
+
+
+func _ready() -> void:
+	super()
+	windows_lod.visibility_layer = NP_LOD_LAYER
+	RenderingServer.canvas_item_set_visibility_layer(window_lod, NP_LOD_LAYER)
+
 
 func _on_connection_dropped(connection: String, type: int, at: Vector2) -> void:
 	var pin_view: Control = null if np_skip_remap else _np_pin_under_mouse()

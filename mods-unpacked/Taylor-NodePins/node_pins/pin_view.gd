@@ -187,6 +187,10 @@ func _ready() -> void:
 	_viewport.disable_3d = true
 	_viewport.gui_disable_input = true
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	# Render only the default layer: the zoomed-out LOD icon overlay lives
+	# on a separate visibility layer (see the desktop extension) so pins
+	# never show the dark LOD box/icon over the node.
+	_viewport.canvas_cull_mask = 1
 	_vp_container.add_child(_viewport)
 	_viewport.world_2d = get_viewport().world_2d
 
@@ -301,7 +305,12 @@ func _create_frame() -> void:
 	_frame_style.set_corner_radius_all(14)
 	_frame_style.set_expand_margin_all(6.0)
 	_frame.add_theme_stylebox_override("panel", _frame_style)
-	window.get_parent().add_child(_frame)
+	# NOT a child of $Windows: the desktop iterates $Windows children with
+	# typed WindowContainer loops (update_lod, heatspot, connection lookup)
+	# and a foreign Panel in there breaks them — notably update_lod, which
+	# runs exactly when the player zooms out. Parent to the desktop instead.
+	var desktop: Node = window.get_parent().get_parent()
+	desktop.add_child(_frame)
 	_update_frame()
 
 

@@ -378,6 +378,24 @@ func _run_self_test() -> void:
 		Signals.delete_connection.emit(source_id, target_id)
 		await get_tree().create_timer(0.5).timeout
 		ModLoaderLog.info("[selftest] cleanup: connection deleted, target input_id=\"%s\"" % target_container.get("input_id"), LOG_NAME)
+	# --- Zoom-cycle test: simulate zooming far out (LOD mode) and back in,
+	# then compare the pin render brightness for residual dark tint.
+	var lum_before: float = _np_avg_luma(view_a._viewport.get_texture().get_image())
+	Signals.distance_level_set.emit(2)
+	await get_tree().create_timer(1.0).timeout
+	var lum_far: float = _np_avg_luma(view_a._viewport.get_texture().get_image())
+	Signals.distance_level_set.emit(0)
+	await get_tree().create_timer(1.0).timeout
+	var lum_after: float = _np_avg_luma(view_a._viewport.get_texture().get_image())
+	ModLoaderLog.info("[selftest] zoom-cycle luma: before=%.4f far=%.4f after=%.4f (after should match before)" % [lum_before, lum_far, lum_after], LOG_NAME)
+
+	var states := PackedStringArray()
+	states.append("window.modulate=%s is_far=%s out=%s" % [str(source_window.modulate), str(source_window.get("is_far")), str(source_window.get("out_of_screen"))])
+	for child in source_window.get_children():
+		if child is Control:
+			states.append("%s a=%.2f" % [child.name, child.modulate.a])
+	ModLoaderLog.info("[selftest] window state after zoom cycle: " + "; ".join(states), LOG_NAME)
+
 	Globals.desktop.set("np_skip_remap", false)
 	Globals.set_connecting("", 0)
 	if not source_was_pinned:
@@ -390,6 +408,24 @@ func _run_self_test() -> void:
 		ModLoaderLog.info("[selftest] CONNECTION THROUGH PINS PASSED", LOG_NAME)
 	else:
 		ModLoaderLog.error("[selftest] CONNECTION THROUGH PINS FAILED", LOG_NAME)
+
+
+func _np_avg_luma(img: Image) -> float:
+	if img == null:
+		return -1.0
+	var total := 0.0
+	var count := 0
+	var step_x := maxi(1, img.get_width() / 32)
+	var step_y := maxi(1, img.get_height() / 32)
+	var x := 0
+	while x < img.get_width():
+		var y := 0
+		while y < img.get_height():
+			total += img.get_pixel(x, y).get_luminance()
+			count += 1
+			y += step_y
+		x += step_x
+	return total / maxf(1.0, float(count))
 
 
 func _window_ancestor_of(node: Node) -> Control:
