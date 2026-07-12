@@ -7,12 +7,16 @@ extends Node
 # top-center of the screen and can be dragged anywhere.
 
 signal pins_changed
+signal favorites_changed
 
 const MOD_ID := "Taylor-NodePins"
 const LOG_NAME := MOD_ID + ":Manager"
 const PERK_ID := "node_pins"
 const SLOTS_PERK_ID := "node_pins_slots"
 const STATE_PATH := "user://taylor_node_pins.json"
+const FAVORITES_STATE_KEY := "__favorites"
+const FAVORITES_PER_COLOR := 2
+const FAVORITES_PER_SLOT := 2
 
 const PinViewScript := preload("res://mods-unpacked/Taylor-NodePins/node_pins/pin_view.gd")
 
@@ -22,7 +26,12 @@ var views: Dictionary = {}
 var saved_state: Dictionary = {}
 var restoring := false
 
-var default_opacity := 0.75
+# Favorites: window name -> color index; each gets a small colored dot on
+# the true node in the world, and page-indicator circles on same-color pins.
+var favorites: Dictionary = {}
+var favorite_dots: Dictionary = {}
+var favorite_windows: Dictionary = {}
+
 var default_scale := 0.6
 
 # Runtime-only capacity override used by the self-test; never persisted.
@@ -64,7 +73,7 @@ func _ready() -> void:
 	Signals.reboot.connect(_on_reboot)
 	Signals.desktop_ready.connect(_on_desktop_ready)
 
-	ModLoaderLog.info("Pin manager online (defaults: opacity %.2f, scale %.2f)." % [default_opacity, default_scale], LOG_NAME)
+	ModLoaderLog.info("Pin manager online (default scale %.2f)." % default_scale, LOG_NAME)
 
 	if OS.get_environment("NODEPINS_SELFTEST") == "1":
 		ModLoaderLog.info("Self-test armed, waiting for desktop.", LOG_NAME)
@@ -115,10 +124,7 @@ func pin(window: Control, settings: Dictionary = {}) -> void:
 		Sound.play("error")
 		return
 
-	var merged := {
-		"opacity": default_opacity,
-	}
-	merged.merge(settings, true)
+	var merged := settings.duplicate()
 	# Pin scale is a global config value, not a per-pin setting (older state
 	# files may still carry a per-pin "scale" key — always override it).
 	merged["scale"] = default_scale
@@ -179,7 +185,13 @@ func _next_pin_number() -> int:
 
 
 func _on_window_deleted(window: WindowContainer) -> void:
-	unpin_by_key(String(window.name))
+	var key := String(window.name)
+	unpin_by_key(key)
+	if favorites.has(key):
+		favorites.erase(key)
+		_remove_dot(key)
+		_schedule_write()
+		favorites_changed.emit()
 
 
 func _on_screen_set(screen: int) -> void:
@@ -192,11 +204,15 @@ func _on_reboot() -> void:
 		if is_instance_valid(view):
 			view.queue_free()
 	views.clear()
+	# Dots live in the desktop scene, which is being torn down.
+	favorite_dots.clear()
+	favorite_windows.clear()
 	pins_changed.emit()
 
 
 func _on_desktop_ready() -> void:
 	_restore_pins.call_deferred()
+	_restore_favorite_dots.call_deferred()
 
 
 func _restore_pins() -> void:
@@ -255,7 +271,6 @@ func _keep_pinned_windows_awake() -> void:
 func _load_config() -> void:
 	var config: ModConfig = ModLoaderConfig.get_current_config(MOD_ID)
 	if config != null and not config.data.is_empty():
-		default_opacity = clampf(float(config.data.get("default_opacity", default_opacity)), 0.2, 1.0)
 		default_scale = clampf(float(config.data.get("default_pin_scale", default_scale)), 0.2, 2.0)
 
 
@@ -265,6 +280,11 @@ func _load_state() -> void:
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(STATE_PATH))
 	if typeof(parsed) == TYPE_DICTIONARY:
 		saved_state = parsed
+		var stored_favorites: Variant = saved_state.get(FAVORITES_STATE_KEY)
+		saved_state.erase(FAVORITES_STATE_KEY)
+		if typeof(stored_favorites) == TYPE_DICTIONARY:
+			for key: String in stored_favorites:
+				favorites[key] = int(stored_favorites[key])
 
 
 func _schedule_write() -> void:
@@ -290,6 +310,8 @@ func _run_self_test() -> void:
 	for w: Node in windows:
 		if "containers" not in w or w.get("closing"):
 			continue
+		if views.has(String(w.name)):
+			continue
 		for c in w.get("containers"):
 			if not is_instance_valid(c):
 				continue
@@ -298,6 +320,8 @@ func _run_self_test() -> void:
 				continue
 			for w2: Node in windows:
 				if w2 == w or "containers" not in w2 or w2.get("closing"):
+					continue
+				if views.has(String(w2.name)):
 					continue
 				for c2 in w2.get("containers"):
 					if not is_instance_valid(c2):
@@ -326,8 +350,6 @@ func _run_self_test() -> void:
 
 	var source_window := _window_ancestor_of(source_connector)
 	var target_window := _window_ancestor_of(target_connector)
-	var source_was_pinned := is_pinned(source_window)
-	var target_was_pinned := is_pinned(target_window)
 	pin(source_window)
 	pin(target_window)
 	await get_tree().create_timer(1.0).timeout
@@ -398,16 +420,37 @@ func _run_self_test() -> void:
 
 	Globals.desktop.set("np_skip_remap", false)
 	Globals.set_connecting("", 0)
-	if not source_was_pinned:
-		unpin_by_key(String(source_window.name))
-	if not target_was_pinned:
-		unpin_by_key(String(target_window.name))
+
+	# --- Favorites test: favorite both nodes under one color, free pin B,
+	# then swap pin A over to node B via the page-indicator path.
+	var key_a: String = String(source_window.name)
+	var key_b: String = String(target_window.name)
+	view_b.set("color_index", view_a.get("color_index"))
+	view_b.call("_apply_color")
+	var fav_color: int = int(view_a.get("color_index"))
+	toggle_favorite(key_a, fav_color)
+	toggle_favorite(key_b, fav_color)
+	ModLoaderLog.info("[selftest] favorites=%s dots=%d same-color list=%s" % [str(favorites.keys()), favorite_dots.size(), str(favorites_of_color(fav_color))], LOG_NAME)
+
+	unpin_by_key(key_b)
+	await get_tree().create_timer(0.4).timeout
+	request_swap(view_a, key_b)
+	await get_tree().create_timer(0.6).timeout
+	var swap_ok: bool = String(view_a.get("window_key")) == key_b and views.has(key_b) and not views.has(key_a)
+	var cam_distance: float = (view_a._camera.global_position - (target_window.global_position + Vector2(target_window.size.x, target_window.size.y) * 0.5)).length()
+	ModLoaderLog.info("[selftest] swap: rekeyed=%s camera_near_target=%.1fpx" % [str(swap_ok), cam_distance], LOG_NAME)
+
+	# Cleanup favorites and pins.
+	toggle_favorite(key_a, fav_color)
+	toggle_favorite(key_b, fav_color)
+	ModLoaderLog.info("[selftest] favorites cleaned: count=%d dots=%d" % [favorites.size(), favorite_dots.size()], LOG_NAME)
+	unpin_by_key(key_b)
 	_test_capacity = 0
 
-	if connected:
-		ModLoaderLog.info("[selftest] CONNECTION THROUGH PINS PASSED", LOG_NAME)
+	if connected and swap_ok:
+		ModLoaderLog.info("[selftest] CONNECTION + FAVORITES PASSED", LOG_NAME)
 	else:
-		ModLoaderLog.error("[selftest] CONNECTION THROUGH PINS FAILED", LOG_NAME)
+		ModLoaderLog.error("[selftest] FAILED (connected=%s swap=%s)" % [str(connected), str(swap_ok)], LOG_NAME)
 
 
 func _np_avg_luma(img: Image) -> float:
@@ -442,4 +485,121 @@ func _write_state() -> void:
 	if file == null:
 		ModLoaderLog.warning("Could not write pin state to %s" % STATE_PATH, LOG_NAME)
 		return
-	file.store_string(JSON.stringify(saved_state))
+	var out := saved_state.duplicate()
+	out[FAVORITES_STATE_KEY] = favorites
+	file.store_string(JSON.stringify(out))
+
+
+# --- Favorites -----------------------------------------------------------
+
+func is_favorite(key: String) -> bool:
+	return favorites.has(key)
+
+
+func favorites_of_color(color: int) -> Array:
+	var result: Array = []
+	for key: String in favorites:
+		if int(favorites[key]) == color:
+			result.append(key)
+	return result
+
+
+func toggle_favorite(key: String, color: int) -> void:
+	if favorites.has(key):
+		favorites.erase(key)
+		_remove_dot(key)
+		Sound.play("close")
+	else:
+		if favorites_of_color(color).size() >= FAVORITES_PER_COLOR:
+			Signals.notify.emit("star", "Only %d favorites per color" % FAVORITES_PER_COLOR)
+			Sound.play("error")
+			return
+		if favorites.size() >= capacity() * FAVORITES_PER_SLOT:
+			Signals.notify.emit("star", "All favorite slots are in use")
+			Sound.play("error")
+			return
+		favorites[key] = color
+		var window := _find_window(key)
+		if window != null:
+			_create_dot(key, color, window)
+		Sound.play("select")
+	_schedule_write()
+	favorites_changed.emit()
+
+
+# Swaps which node a pin views: smooth camera pan inside the pin, and the
+# pin's key, persistence entry, frame, and interaction move to the target.
+func request_swap(view: Control, target_key: String) -> void:
+	if views.has(target_key):
+		Signals.notify.emit("tether", "That node is already pinned")
+		Sound.play("error")
+		return
+	var target := _find_window(target_key)
+	if target == null:
+		# Stale favorite (node no longer exists): drop it.
+		if favorites.has(target_key):
+			favorites.erase(target_key)
+			_remove_dot(target_key)
+			_schedule_write()
+			favorites_changed.emit()
+		return
+
+	var old_key: String = view.get("window_key")
+	views.erase(old_key)
+	views[target_key] = view
+	if saved_state.has(old_key):
+		saved_state[target_key] = saved_state[old_key]
+		saved_state.erase(old_key)
+		_schedule_write()
+	view.call("retarget", target)
+	pins_changed.emit()
+
+
+func _create_dot(key: String, color: int, window: Control) -> void:
+	_remove_dot(key)
+	var dot := Panel.new()
+	dot.name = "NodePinFavDot_" + key
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dot.z_index = 2
+	dot.size = Vector2(20, 20)
+	var style := StyleBoxFlat.new()
+	style.bg_color = PinViewScript.PIN_COLORS[clampi(color, 0, PinViewScript.PIN_COLORS.size() - 1)]
+	style.set_corner_radius_all(10)
+	style.set_border_width_all(2)
+	style.border_color = Color(0.098, 0.122, 0.169, 1.0)
+	dot.add_theme_stylebox_override("panel", style)
+	Globals.desktop.add_child(dot)
+	favorite_dots[key] = dot
+	favorite_windows[key] = window
+
+
+func _remove_dot(key: String) -> void:
+	var dot: Node = favorite_dots.get(key)
+	if dot != null and is_instance_valid(dot):
+		dot.queue_free()
+	favorite_dots.erase(key)
+	favorite_windows.erase(key)
+
+
+func _restore_favorite_dots() -> void:
+	var dropped: Array[String] = []
+	for key: String in favorites:
+		var window := _find_window(key)
+		if window != null:
+			_create_dot(key, int(favorites[key]), window)
+		else:
+			dropped.append(key)
+	for key: String in dropped:
+		favorites.erase(key)
+	if not dropped.is_empty():
+		_schedule_write()
+	favorites_changed.emit()
+
+
+# Keep favorite dots glued to the top-right corner of their nodes.
+func _process(_delta: float) -> void:
+	for key: String in favorite_dots:
+		var dot: Control = favorite_dots[key]
+		var window: Control = favorite_windows.get(key)
+		if is_instance_valid(dot) and is_instance_valid(window):
+			dot.global_position = window.global_position + Vector2(window.size.x - 12.0, -8.0)

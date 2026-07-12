@@ -1,8 +1,8 @@
 {
 	"name": "NodePins",
 	"namespace": "Taylor",
-	"version_number": "1.4.0",
-	"description": "Pin nodes to your screen as interactive, translucent live overlays that stay visible while you pan the desktop. Drag connections straight onto pins. Unlocked through token-cost upgrades (plus research-cost extra slots). Pins are draggable, resizable, zoomable, and mark the node with a colored frame.",
+	"version_number": "1.5.0",
+	"description": "Pin nodes to your screen as interactive live overlays that stay visible while you pan the desktop. Drag connections straight onto pins, favorite pinned nodes and swap between them with page-indicator dots. Unlocked through token-cost upgrades (plus research-cost extra slots). Pins are draggable, resizable, zoomable, and mark the node with a colored frame.",
 	"website_url": "https://github.com/tailored-data/upload-labs-node-pins",
 	"dependencies": [],
 	"extra": {
@@ -16,14 +16,6 @@
 				"title": "Node Pins",
 				"type": "object",
 				"properties": {
-					"default_opacity": {
-						"title": "Default pin opacity",
-						"description": "Starting transparency of newly pinned nodes (0.2 = very transparent, 1 = opaque).",
-						"type": "number",
-						"default": 0.75,
-						"minimum": 0.2,
-						"maximum": 1
-					},
 					"default_pin_scale": {
 						"title": "Default pin scale",
 						"description": "Starting scale of newly pinned nodes, relative to the node's own size (1 = actual size).",

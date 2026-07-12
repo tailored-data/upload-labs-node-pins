@@ -8,16 +8,21 @@ extends PanelContainer
 # The pin window is draggable by its header, resizable by its bottom-right
 # corner, titled "Node Pin #N", and marks the real node with a colored
 # border frame (cycleable via the palette button). The settings (cog)
-# panel adjusts opacity and render zoom (hard-limited).
+# panel adjusts render zoom (hard-limited). Pins are fully opaque.
+#
+# Favorites: the star button favorites the currently viewed node (dot on
+# the true node in the world). A page-indicator row of circles under the
+# view lists same-color favorites — filled circle = current node; click
+# an empty circle to smoothly pan this pin's camera over to that node.
 
-const MIN_OPACITY := 0.2
-const MAX_OPACITY := 1.0
 const MIN_ZOOM := 0.15
 const MAX_ZOOM := 1.5
 const PADDING := 16.0
 const RESIZE_GRAB := 26.0
 const MIN_VIEW_SIZE := Vector2(160.0, 120.0)
 const HEADER_ICON_SIZE := Vector2(26, 26)
+const BOTTOM_CLEARANCE := 130.0
+const FAVORITE_TINT := Color(1.0, 0.9, 0.4)
 
 const PIN_COLORS: Array[Color] = [
 	Color(0.55, 0.95, 1.0),
@@ -32,7 +37,6 @@ var window: Control
 var manager: Node
 var window_key := ""
 var pin_number := 1
-var opacity := 0.75
 var pin_scale := 0.6
 var color_index := 0
 var view_size := Vector2.ZERO
@@ -46,6 +50,8 @@ var _settings_panel: PanelContainer
 var _panel_style: StyleBoxFlat
 var _frame: Panel
 var _frame_style: StyleBoxFlat
+var _favorite_button: Button
+var _fav_row: HBoxContainer
 var _saved_position := Vector2.INF
 var _dragging := false
 var _drag_offset := Vector2.ZERO
@@ -53,6 +59,7 @@ var _resizing := false
 var _resize_start_mouse := Vector2.ZERO
 var _resize_start_size := Vector2.ZERO
 var _pin_connecting := false
+var _swapping := false
 var _closing := false
 
 
@@ -61,7 +68,6 @@ func setup(p_window: Control, p_manager: Node, p_number: int, settings: Dictiona
 	manager = p_manager
 	window_key = String(p_window.name)
 	pin_number = p_number
-	opacity = clampf(float(settings.get("opacity", opacity)), MIN_OPACITY, MAX_OPACITY)
 	pin_scale = clampf(float(settings.get("scale", pin_scale)), 0.2, 2.0)
 	color_index = clampi(int(settings.get("color", 0)), 0, PIN_COLORS.size() - 1)
 	if settings.has("w") and settings.has("h"):
@@ -74,7 +80,6 @@ func setup(p_window: Control, p_manager: Node, p_number: int, settings: Dictiona
 
 func get_settings() -> Dictionary:
 	return {
-		"opacity": opacity,
 		"color": color_index,
 		"x": position.x,
 		"y": position.y,
@@ -90,7 +95,7 @@ func _ready() -> void:
 	gui_input.connect(_on_panel_gui_input)
 
 	_panel_style = StyleBoxFlat.new()
-	_panel_style.bg_color = Color(0.098, 0.122, 0.169, 0.92)
+	_panel_style.bg_color = Color(0.098, 0.122, 0.169, 1.0)
 	_panel_style.set_corner_radius_all(10)
 	_panel_style.set_content_margin_all(8)
 	_panel_style.content_margin_bottom = 14.0
@@ -135,6 +140,11 @@ func _ready() -> void:
 	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header_box.add_child(_title)
 
+	_favorite_button = _make_icon_button("res://textures/icons/star.png")
+	_favorite_button.tooltip_text = "Favorite this node"
+	_favorite_button.pressed.connect(_on_favorite_pressed)
+	header_box.add_child(_favorite_button)
+
 	var color_button := _make_icon_button("res://textures/icons/palette.png")
 	color_button.tooltip_text = "Cycle pin color"
 	color_button.pressed.connect(_on_color_pressed)
@@ -163,10 +173,6 @@ func _ready() -> void:
 	settings_box.add_theme_constant_override("separation", 6)
 	_settings_panel.add_child(settings_box)
 
-	settings_box.add_child(_make_slider_row(
-		"res://textures/icons/eye_ball.png", "Opacity",
-		MIN_OPACITY, MAX_OPACITY, 0.05, opacity, _on_opacity_changed
-	))
 	settings_box.add_child(_make_slider_row(
 		"res://textures/icons/zoom_in.png", "Zoom",
 		MIN_ZOOM, MAX_ZOOM, 0.05, maxf(view_zoom, MIN_ZOOM), _on_zoom_changed
@@ -197,10 +203,21 @@ func _ready() -> void:
 	_camera = Camera2D.new()
 	_viewport.add_child(_camera)
 
+	# Page-indicator row for favorites (filled = current, empty = swap to).
+	_fav_row = HBoxContainer.new()
+	_fav_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_fav_row.add_theme_constant_override("separation", 8)
+	_fav_row.visible = false
+	root.add_child(_fav_row)
+
+	if manager.has_signal("favorites_changed"):
+		manager.connect("favorites_changed", _refresh_favorites)
+
 	_init_view_defaults()
 	_vp_container.custom_minimum_size = view_size
 	_create_frame()
 	_apply_color()
+	_refresh_favorites()
 	modulate.a = 0.0
 	_init_position.call_deferred()
 
@@ -219,6 +236,68 @@ func _process(delta: float) -> void:
 	_update_camera()
 	_update_frame()
 	_update_resize_cursor()
+
+
+# --- Favorites -----------------------------------------------------------
+
+func _on_favorite_pressed() -> void:
+	manager.call("toggle_favorite", window_key, color_index)
+
+
+# Smoothly pans this pin's camera over to another (favorited) node and
+# rebinds the view, frame, and interaction to it.
+func retarget(new_window: Control) -> void:
+	window = new_window
+	window_key = String(new_window.name)
+	_swapping = true
+	var target: Vector2 = window.global_position + _window_world_size() * 0.5
+	var tween := create_tween()
+	tween.tween_property(_camera, "global_position", target, 0.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	tween.finished.connect(func() -> void: _swapping = false)
+	manager.call("pin_settings_changed", window_key, get_settings())
+	_refresh_favorites()
+	Sound.play("click_toggle2")
+
+
+func _refresh_favorites() -> void:
+	if _fav_row == null:
+		return
+	for child in _fav_row.get_children():
+		child.queue_free()
+
+	var favorites: Array = manager.call("favorites_of_color", color_index)
+	# Current node first, so the filled circle sits toward the left.
+	if favorites.has(window_key):
+		favorites.erase(window_key)
+		favorites.push_front(window_key)
+	_fav_row.visible = favorites.size() > 0
+
+	for key in favorites:
+		var circle := Button.new()
+		circle.flat = true
+		circle.focus_mode = Control.FOCUS_NONE
+		circle.custom_minimum_size = Vector2(16, 16)
+		var style := StyleBoxFlat.new()
+		style.set_corner_radius_all(8)
+		if String(key) == window_key:
+			style.bg_color = PIN_COLORS[color_index]
+			circle.tooltip_text = "Current node"
+			circle.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		else:
+			style.draw_center = false
+			style.set_border_width_all(2)
+			style.border_color = PIN_COLORS[color_index]
+			circle.tooltip_text = "Swap to this favorite"
+			circle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+			var target_key := String(key)
+			circle.pressed.connect(func() -> void: manager.call("request_swap", self, target_key))
+		for style_name: String in ["normal", "hover", "pressed"]:
+			circle.add_theme_stylebox_override(style_name, style)
+		_fav_row.add_child(circle)
+
+	var is_favorite: bool = manager.call("is_favorite", window_key)
+	_favorite_button.self_modulate = FAVORITE_TINT if is_favorite else Color(1, 1, 1)
+	_favorite_button.tooltip_text = "Unfavorite this node" if is_favorite else "Favorite this node"
 
 
 # Initial frame size derives from the node's own dimensions (scaled, with
@@ -249,16 +328,18 @@ func _init_position() -> void:
 	if _saved_position != Vector2.INF:
 		position = _saved_position
 	else:
+		# Bottom-center, sitting just above the node browser bar, cascading
+		# up-right for additional pins.
 		position = Vector2(
 			(viewport_size.x - size.x) * 0.5 + float(pin_number - 1) * 36.0,
-			16.0 + float(pin_number - 1) * 36.0
+			viewport_size.y - size.y - BOTTOM_CLEARANCE - float(pin_number - 1) * 36.0
 		)
 	_clamp_to_screen()
 	manager.call("pin_settings_changed", window_key, get_settings())
 	_play_intro()
 
 
-# --- Animations -------------------------------------------------------
+# --- Animations -----------------------------------------------------------
 
 func _play_intro() -> void:
 	# "Fade-in slam": starts oversized and transparent, slams down to size.
@@ -269,7 +350,7 @@ func _play_intro() -> void:
 	tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tween.tween_property(self, "scale", Vector2.ONE, 0.22)
 	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "modulate:a", opacity, 0.18)
+	tween.tween_property(self, "modulate:a", 1.0, 0.18)
 
 
 func play_outro() -> void:
@@ -290,7 +371,7 @@ func play_outro() -> void:
 	tween.chain().tween_callback(queue_free)
 
 
-# --- Node frame (colored border on the real node) ----------------------
+# --- Node frame (colored border on the real node) --------------------------
 
 func _create_frame() -> void:
 	if not is_instance_valid(window):
@@ -327,7 +408,7 @@ func _remove_frame() -> void:
 	_frame = null
 
 
-# --- Layout / camera ----------------------------------------------------
+# --- Layout / camera --------------------------------------------------------
 
 func _window_world_size() -> Vector2:
 	var height := 0.0
@@ -341,7 +422,8 @@ func _window_world_size() -> Vector2:
 
 
 func _update_camera() -> void:
-	_camera.global_position = window.global_position + _window_world_size() * 0.5
+	if not _swapping:
+		_camera.global_position = window.global_position + _window_world_size() * 0.5
 	_camera.zoom = Vector2(view_zoom, view_zoom)
 
 
@@ -474,7 +556,7 @@ func _find_button_at(world_point: Vector2) -> BaseButton:
 	return best
 
 
-# --- Drag (header) and resize (bottom-right corner) ---------------------
+# --- Drag (header) and resize (bottom-right corner) -------------------------
 
 func _on_header_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -526,7 +608,7 @@ func _clamp_to_screen() -> void:
 	position = position.clamp(Vector2.ZERO, (viewport_size - size).max(Vector2.ZERO))
 
 
-# --- UI construction and settings ---------------------------------------
+# --- UI construction and settings -------------------------------------------
 
 func _make_icon_button(icon_path: String) -> Button:
 	var button := Button.new()
@@ -572,12 +654,6 @@ func _apply_color() -> void:
 		_frame_style.border_color = tint
 
 
-func _on_opacity_changed(value: float) -> void:
-	opacity = clampf(value, MIN_OPACITY, MAX_OPACITY)
-	modulate.a = opacity
-	manager.call("pin_settings_changed", window_key, get_settings())
-
-
 func _on_zoom_changed(value: float) -> void:
 	view_zoom = clampf(value, MIN_ZOOM, MAX_ZOOM)
 	manager.call("pin_settings_changed", window_key, get_settings())
@@ -586,6 +662,7 @@ func _on_zoom_changed(value: float) -> void:
 func _on_color_pressed() -> void:
 	color_index = (color_index + 1) % PIN_COLORS.size()
 	_apply_color()
+	_refresh_favorites()
 	manager.call("pin_settings_changed", window_key, get_settings())
 	Sound.play("click_toggle2")
 
