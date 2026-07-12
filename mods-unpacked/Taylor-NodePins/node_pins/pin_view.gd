@@ -52,6 +52,7 @@ var _frame: Panel
 var _frame_style: StyleBoxFlat
 var _favorite_button: Button
 var _fav_row: HBoxContainer
+var _bottom_bar: HBoxContainer
 var _saved_position := Vector2.INF
 var _dragging := false
 var _drag_offset := Vector2.ZERO
@@ -203,12 +204,35 @@ func _ready() -> void:
 	_camera = Camera2D.new()
 	_viewport.add_child(_camera)
 
-	# Page-indicator row for favorites (filled = current, empty = swap to).
+	# Bottom bar: "Current" caption at the left, page-indicator circles
+	# centered (filled circle = the favorite currently in view).
+	_bottom_bar = HBoxContainer.new()
+	_bottom_bar.add_theme_constant_override("separation", 8)
+	_bottom_bar.visible = false
+	root.add_child(_bottom_bar)
+
+	var current_label := Label.new()
+	current_label.text = "Current"
+	current_label.add_theme_font_size_override("font_size", 12)
+	current_label.modulate = Color(1, 1, 1, 0.65)
+	current_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	current_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_bottom_bar.add_child(current_label)
+
+	var spacer_left := Control.new()
+	spacer_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spacer_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bottom_bar.add_child(spacer_left)
+
 	_fav_row = HBoxContainer.new()
 	_fav_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_fav_row.add_theme_constant_override("separation", 8)
-	_fav_row.visible = false
-	root.add_child(_fav_row)
+	_bottom_bar.add_child(_fav_row)
+
+	var spacer_right := Control.new()
+	spacer_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spacer_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bottom_bar.add_child(spacer_right)
 
 	if manager.has_signal("favorites_changed"):
 		manager.connect("favorites_changed", _refresh_favorites)
@@ -265,40 +289,36 @@ func _refresh_favorites() -> void:
 	for child in _fav_row.get_children():
 		child.queue_free()
 
+	# Stable order (no reordering): each circle represents one favorited
+	# node, and the FILL moves between circles as the view swaps.
 	var favorites: Array = manager.call("favorites_of_color", color_index)
-	# Current node first, so the filled circle sits toward the left.
-	if favorites.has(window_key):
-		favorites.erase(window_key)
-		favorites.push_front(window_key)
-	_fav_row.visible = favorites.size() > 0
+	_bottom_bar.visible = favorites.size() > 0
 
 	for key in favorites:
 		# Plain Controls with direct canvas draw calls: Button styleboxes
 		# proved unreliable under the game's global theme (circles rendered
-		# invisible with a collapsed hit area).
+		# invisible with a collapsed hit area). Fill state and click action
+		# both check window_key LIVE, so the filled circle always tracks
+		# the node currently in view — no stale captured state.
 		var circle := Control.new()
 		circle.custom_minimum_size = Vector2(20, 20)
 		circle.mouse_filter = Control.MOUSE_FILTER_STOP
-		var is_current := String(key) == window_key
+		circle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		circle.tooltip_text = "Swap to this favorite"
+		var key_copy := String(key)
 		var circle_color := PIN_COLORS[color_index]
 		circle.draw.connect(func() -> void:
 			var center := circle.size * 0.5
-			if is_current:
+			if key_copy == window_key:
 				circle.draw_circle(center, 7.0, circle_color)
 			else:
-				circle.draw_arc(center, 6.0, 0.0, TAU, 32, circle_color, 2.5, true)
+				circle.draw_arc(center, 6.0, 0.0, TAU, 64, circle_color, 2.0, true)
 		)
-		if is_current:
-			circle.tooltip_text = "Current node"
-			circle.mouse_default_cursor_shape = Control.CURSOR_ARROW
-		else:
-			circle.tooltip_text = "Swap to this favorite"
-			circle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-			var target_key := String(key)
-			circle.gui_input.connect(func(event: InputEvent) -> void:
-				if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-					manager.call("request_swap", self, target_key)
-			)
+		circle.gui_input.connect(func(event: InputEvent) -> void:
+			if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+				if key_copy != window_key:
+					manager.call("request_swap", self, key_copy)
+		)
 		_fav_row.add_child(circle)
 
 	var is_favorite: bool = manager.call("is_favorite", window_key)
