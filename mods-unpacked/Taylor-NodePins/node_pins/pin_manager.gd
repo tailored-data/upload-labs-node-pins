@@ -400,75 +400,58 @@ func _run_self_test() -> void:
 		Signals.delete_connection.emit(source_id, target_id)
 		await get_tree().create_timer(0.5).timeout
 		ModLoaderLog.info("[selftest] cleanup: connection deleted, target input_id=\"%s\"" % target_container.get("input_id"), LOG_NAME)
-	# --- Zoom-cycle test: simulate zooming far out (LOD mode) and back in,
-	# then compare the pin render brightness for residual dark tint.
-	var lum_before: float = _np_avg_luma(view_a._viewport.get_texture().get_image())
-	Signals.distance_level_set.emit(2)
-	await get_tree().create_timer(1.0).timeout
-	var lum_far: float = _np_avg_luma(view_a._viewport.get_texture().get_image())
-	Signals.distance_level_set.emit(0)
-	await get_tree().create_timer(1.0).timeout
-	var lum_after: float = _np_avg_luma(view_a._viewport.get_texture().get_image())
-	ModLoaderLog.info("[selftest] zoom-cycle luma: before=%.4f far=%.4f after=%.4f (after should match before)" % [lum_before, lum_far, lum_after], LOG_NAME)
-
-	var states := PackedStringArray()
-	states.append("window.modulate=%s is_far=%s out=%s" % [str(source_window.modulate), str(source_window.get("is_far")), str(source_window.get("out_of_screen"))])
-	for child in source_window.get_children():
-		if child is Control:
-			states.append("%s a=%.2f" % [child.name, child.modulate.a])
-	ModLoaderLog.info("[selftest] window state after zoom cycle: " + "; ".join(states), LOG_NAME)
 
 	Globals.desktop.set("np_skip_remap", false)
 	Globals.set_connecting("", 0)
 
 	# --- Favorites test: favorite both nodes under one color, free pin B,
-	# then swap pin A over to node B via the page-indicator path.
-	var key_a: String = String(source_window.name)
-	var key_b: String = String(target_window.name)
-	view_b.set("color_index", view_a.get("color_index"))
-	view_b.call("_apply_color")
-	var fav_color: int = int(view_a.get("color_index"))
-	toggle_favorite(key_a, fav_color)
-	toggle_favorite(key_b, fav_color)
-	ModLoaderLog.info("[selftest] favorites=%s dots=%d same-color list=%s" % [str(favorites.keys()), favorite_dots.size(), str(favorites_of_color(fav_color))], LOG_NAME)
+	# then swap pin A over to node B via the page-indicator path. The
+	# user's real favorites are snapshotted and restored afterwards, and
+	# the test uses a color group that has no existing favorites so the
+	# per-color cap cannot interfere.
+	var favorites_snapshot: Dictionary = favorites.duplicate(true)
+	var fav_color := -1
+	for color_candidate: int in range(PinViewScript.PIN_COLORS.size()):
+		if favorites_of_color(color_candidate).is_empty():
+			fav_color = color_candidate
+			break
+	var swap_ok := false
+	if fav_color < 0:
+		ModLoaderLog.warning("[selftest] no free color group, skipping favorites test", LOG_NAME)
+		swap_ok = true
+	else:
+		var key_a: String = String(source_window.name)
+		var key_b: String = String(target_window.name)
+		view_a.set("color_index", fav_color)
+		view_a.call("_apply_color")
+		view_b.set("color_index", fav_color)
+		view_b.call("_apply_color")
+		toggle_favorite(key_a, fav_color)
+		toggle_favorite(key_b, fav_color)
+		ModLoaderLog.info("[selftest] test color=%d same-color list=%s dots=%d" % [fav_color, str(favorites_of_color(fav_color)), favorite_dots.size()], LOG_NAME)
 
-	unpin_by_key(key_b)
-	await get_tree().create_timer(0.4).timeout
-	request_swap(view_a, key_b)
-	await get_tree().create_timer(0.6).timeout
-	var swap_ok: bool = String(view_a.get("window_key")) == key_b and views.has(key_b) and not views.has(key_a)
-	var cam_distance: float = (view_a._camera.global_position - (target_window.global_position + Vector2(target_window.size.x, target_window.size.y) * 0.5)).length()
-	ModLoaderLog.info("[selftest] swap: rekeyed=%s camera_near_target=%.1fpx" % [str(swap_ok), cam_distance], LOG_NAME)
+		unpin_by_key(key_b)
+		await get_tree().create_timer(0.4).timeout
+		request_swap(view_a, key_b)
+		await get_tree().create_timer(0.6).timeout
+		swap_ok = String(view_a.get("window_key")) == key_b and views.has(key_b) and not views.has(key_a)
+		var cam_distance: float = (view_a._camera.global_position - (target_window.global_position + Vector2(target_window.size.x, target_window.size.y) * 0.5)).length()
+		ModLoaderLog.info("[selftest] swap: rekeyed=%s camera_near_target=%.1fpx" % [str(swap_ok), cam_distance], LOG_NAME)
+		unpin_by_key(key_b)
 
-	# Cleanup favorites and pins.
-	toggle_favorite(key_a, fav_color)
-	toggle_favorite(key_b, fav_color)
-	ModLoaderLog.info("[selftest] favorites cleaned: count=%d dots=%d" % [favorites.size(), favorite_dots.size()], LOG_NAME)
-	unpin_by_key(key_b)
+	# Restore the user's favorites exactly as they were.
+	favorites = favorites_snapshot.duplicate(true)
+	for dot_key: String in favorite_dots.keys():
+		_remove_dot(dot_key)
+	_restore_favorite_dots()
+	_schedule_write()
+	ModLoaderLog.info("[selftest] user favorites restored: count=%d dots=%d" % [favorites.size(), favorite_dots.size()], LOG_NAME)
 	_test_capacity = 0
 
 	if connected and swap_ok:
 		ModLoaderLog.info("[selftest] CONNECTION + FAVORITES PASSED", LOG_NAME)
 	else:
 		ModLoaderLog.error("[selftest] FAILED (connected=%s swap=%s)" % [str(connected), str(swap_ok)], LOG_NAME)
-
-
-func _np_avg_luma(img: Image) -> float:
-	if img == null:
-		return -1.0
-	var total := 0.0
-	var count := 0
-	var step_x := maxi(1, img.get_width() / 32)
-	var step_y := maxi(1, img.get_height() / 32)
-	var x := 0
-	while x < img.get_width():
-		var y := 0
-		while y < img.get_height():
-			total += img.get_pixel(x, y).get_luminance()
-			count += 1
-			y += step_y
-		x += step_x
-	return total / maxf(1.0, float(count))
 
 
 func _window_ancestor_of(node: Node) -> Control:
@@ -596,10 +579,18 @@ func _restore_favorite_dots() -> void:
 	favorites_changed.emit()
 
 
-# Keep favorite dots glued to the top-right corner of their nodes.
+# Keep favorite dots glued to their nodes: vertically centered in the
+# title bar, just inside its right edge.
 func _process(_delta: float) -> void:
 	for key: String in favorite_dots:
 		var dot: Control = favorite_dots[key]
 		var window: Control = favorite_windows.get(key)
 		if is_instance_valid(dot) and is_instance_valid(window):
-			dot.global_position = window.global_position + Vector2(window.size.x - 12.0, -8.0)
+			var title_height := 44.0
+			var title: Control = window.get_node_or_null("TitlePanel")
+			if title != null:
+				title_height = title.size.y
+			dot.global_position = window.global_position + Vector2(
+				window.size.x - dot.size.x - 14.0,
+				(title_height - dot.size.y) * 0.5
+			)

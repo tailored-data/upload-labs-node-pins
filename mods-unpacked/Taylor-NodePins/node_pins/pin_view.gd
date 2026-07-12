@@ -189,9 +189,13 @@ func _ready() -> void:
 	root.add_child(_vp_container)
 
 	_viewport = SubViewport.new()
-	_viewport.transparent_bg = true
+	# Opaque background: the game world fully covers the view, and the
+	# transparent-background compositing path darkens the displayed result
+	# (measured ~25% darker by the parity self-test).
+	_viewport.transparent_bg = false
 	_viewport.disable_3d = true
 	_viewport.gui_disable_input = true
+	_viewport.use_hdr_2d = true
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	# Render only the default layer: the zoomed-out LOD icon overlay lives
 	# on a separate visibility layer (see the desktop extension) so pins
@@ -273,26 +277,32 @@ func _refresh_favorites() -> void:
 	_fav_row.visible = favorites.size() > 0
 
 	for key in favorites:
-		var circle := Button.new()
-		circle.flat = true
-		circle.focus_mode = Control.FOCUS_NONE
-		circle.custom_minimum_size = Vector2(16, 16)
-		var style := StyleBoxFlat.new()
-		style.set_corner_radius_all(8)
-		if String(key) == window_key:
-			style.bg_color = PIN_COLORS[color_index]
+		# Plain Controls with direct canvas draw calls: Button styleboxes
+		# proved unreliable under the game's global theme (circles rendered
+		# invisible with a collapsed hit area).
+		var circle := Control.new()
+		circle.custom_minimum_size = Vector2(20, 20)
+		circle.mouse_filter = Control.MOUSE_FILTER_STOP
+		var is_current := String(key) == window_key
+		var circle_color := PIN_COLORS[color_index]
+		circle.draw.connect(func() -> void:
+			var center := circle.size * 0.5
+			if is_current:
+				circle.draw_circle(center, 7.0, circle_color)
+			else:
+				circle.draw_arc(center, 6.0, 0.0, TAU, 32, circle_color, 2.5, true)
+		)
+		if is_current:
 			circle.tooltip_text = "Current node"
 			circle.mouse_default_cursor_shape = Control.CURSOR_ARROW
 		else:
-			style.draw_center = false
-			style.set_border_width_all(2)
-			style.border_color = PIN_COLORS[color_index]
 			circle.tooltip_text = "Swap to this favorite"
 			circle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 			var target_key := String(key)
-			circle.pressed.connect(func() -> void: manager.call("request_swap", self, target_key))
-		for style_name: String in ["normal", "hover", "pressed"]:
-			circle.add_theme_stylebox_override(style_name, style)
+			circle.gui_input.connect(func(event: InputEvent) -> void:
+				if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+					manager.call("request_swap", self, target_key)
+			)
 		_fav_row.add_child(circle)
 
 	var is_favorite: bool = manager.call("is_favorite", window_key)
