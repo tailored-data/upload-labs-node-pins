@@ -52,7 +52,6 @@ var _frame: Panel
 var _frame_style: StyleBoxFlat
 var _favorite_button: Button
 var _fav_row: HBoxContainer
-var _bottom_bar: HBoxContainer
 var _saved_position := Vector2.INF
 var _dragging := false
 var _drag_offset := Vector2.ZERO
@@ -204,35 +203,13 @@ func _ready() -> void:
 	_camera = Camera2D.new()
 	_viewport.add_child(_camera)
 
-	# Bottom bar: "Current" caption at the left, page-indicator circles
-	# centered (filled circle = the favorite currently in view).
-	_bottom_bar = HBoxContainer.new()
-	_bottom_bar.add_theme_constant_override("separation", 8)
-	_bottom_bar.visible = false
-	root.add_child(_bottom_bar)
-
-	var current_label := Label.new()
-	current_label.text = "Current"
-	current_label.add_theme_font_size_override("font_size", 12)
-	current_label.modulate = Color(1, 1, 1, 0.65)
-	current_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	current_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_bottom_bar.add_child(current_label)
-
-	var spacer_left := Control.new()
-	spacer_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_bottom_bar.add_child(spacer_left)
-
+	# Page-indicator row for favorites, centered under the view: filled
+	# circle = the favorite currently in view; click an empty one to swap.
 	_fav_row = HBoxContainer.new()
 	_fav_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_fav_row.add_theme_constant_override("separation", 8)
-	_bottom_bar.add_child(_fav_row)
-
-	var spacer_right := Control.new()
-	spacer_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_bottom_bar.add_child(spacer_right)
+	_fav_row.visible = false
+	root.add_child(_fav_row)
 
 	if manager.has_signal("favorites_changed"):
 		manager.connect("favorites_changed", _refresh_favorites)
@@ -260,6 +237,22 @@ func _process(delta: float) -> void:
 	_update_camera()
 	_update_frame()
 	_update_resize_cursor()
+	_sync_favorite_fill()
+
+
+# Controls only repaint when told to: force a redraw the moment a circle's
+# filled/empty state no longer matches which node this pin is viewing, so
+# the drawn fill can never go stale against the click logic.
+func _sync_favorite_fill() -> void:
+	if _fav_row == null:
+		return
+	for circle in _fav_row.get_children():
+		if not circle.has_meta("fav_key"):
+			continue
+		var want_filled: bool = String(circle.get_meta("fav_key")) == window_key
+		if not circle.has_meta("np_drawn_filled") or bool(circle.get_meta("np_drawn_filled")) != want_filled:
+			circle.set_meta("np_drawn_filled", want_filled)
+			circle.queue_redraw()
 
 
 # --- Favorites -----------------------------------------------------------
@@ -292,7 +285,7 @@ func _refresh_favorites() -> void:
 	# Stable order (no reordering): each circle represents one favorited
 	# node, and the FILL moves between circles as the view swaps.
 	var favorites: Array = manager.call("favorites_of_color", color_index)
-	_bottom_bar.visible = favorites.size() > 0
+	_fav_row.visible = favorites.size() > 0
 
 	for key in favorites:
 		# Plain Controls with direct canvas draw calls: Button styleboxes
@@ -306,6 +299,7 @@ func _refresh_favorites() -> void:
 		circle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		circle.tooltip_text = "Swap to this favorite"
 		var key_copy := String(key)
+		circle.set_meta("fav_key", key_copy)
 		var circle_color := PIN_COLORS[color_index]
 		circle.draw.connect(func() -> void:
 			var center := circle.size * 0.5
