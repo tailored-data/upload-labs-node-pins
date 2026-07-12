@@ -215,7 +215,7 @@ func _ready() -> void:
 	_fav_strip.custom_minimum_size = Vector2(0, 22)
 	_fav_strip.mouse_filter = Control.MOUSE_FILTER_STOP
 	_fav_strip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	_fav_strip.tooltip_text = "Favorites: click an empty circle to swap"
+	_fav_strip.tooltip_text = "Favorites: click a filled circle to swap"
 	_fav_strip.visible = false
 	_fav_strip.draw.connect(_on_strip_draw)
 	_fav_strip.gui_input.connect(_on_strip_gui_input)

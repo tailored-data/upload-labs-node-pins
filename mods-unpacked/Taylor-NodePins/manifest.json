@@ -1,7 +1,7 @@
 {
 	"name": "NodePins",
 	"namespace": "Taylor",
-	"version_number": "1.5.0",
+	"version_number": "1.6.0",
 	"description": "Pin nodes to your screen as interactive live overlays that stay visible while you pan the desktop. Drag connections straight onto pins, favorite pinned nodes and swap between them with page-indicator dots. Unlocked through token-cost upgrades (plus research-cost extra slots). Pins are draggable, resizable, zoomable, and mark the node with a colored frame.",
 	"website_url": "https://github.com/tailored-data/upload-labs-node-pins",
 	"dependencies": [],

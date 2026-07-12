@@ -34,9 +34,6 @@ var favorite_windows: Dictionary = {}
 
 var default_scale := 0.6
 
-# Runtime-only capacity override used by the self-test; never persisted.
-var _test_capacity := 0
-
 var _write_timer: Timer
 
 
@@ -75,14 +72,9 @@ func _ready() -> void:
 
 	ModLoaderLog.info("Pin manager online (default scale %.2f)." % default_scale, LOG_NAME)
 
-	if OS.get_environment("NODEPINS_SELFTEST") == "1":
-		ModLoaderLog.info("Self-test armed, waiting for desktop.", LOG_NAME)
-		Signals.desktop_ready.connect(_run_self_test, CONNECT_ONE_SHOT)
-
 
 func capacity() -> int:
-	var owned: int = int(Globals.perks.get(PERK_ID, 0)) + int(Globals.perks.get(SLOTS_PERK_ID, 0))
-	return maxi(owned, _test_capacity)
+	return int(Globals.perks.get(PERK_ID, 0)) + int(Globals.perks.get(SLOTS_PERK_ID, 0))
 
 
 # Used by the desktop script extension to remap connection drags/drops
@@ -290,177 +282,6 @@ func _load_state() -> void:
 func _schedule_write() -> void:
 	if _write_timer != null:
 		_write_timer.start()
-
-
-# End-to-end exercise of the pin connection flow, enabled by setting the
-# environment variable NODEPINS_SELFTEST=1. Finds a compatible output ->
-# input connector pair on two different nodes, pins both, performs the
-# connection entirely through the pin views, verifies it, then deletes it
-# again — so the savegame is left exactly as it was. Uses a runtime
-# capacity override instead of granting perk levels.
-func _run_self_test() -> void:
-	await get_tree().create_timer(3.0).timeout
-	_test_capacity = 99
-	ModLoaderLog.info("[selftest] capacity=%d pin_count=%d" % [capacity(), pin_count()], LOG_NAME)
-
-	var source_connector: Control = null
-	var target_connector: Control = null
-	var windows: Array[Node] = get_tree().get_nodes_in_group("window")
-
-	for w: Node in windows:
-		if "containers" not in w or w.get("closing"):
-			continue
-		if views.has(String(w.name)) or favorites.has(String(w.name)):
-			continue
-		for c in w.get("containers"):
-			if not is_instance_valid(c):
-				continue
-			var out: Control = c.get_node_or_null("OutputConnector")
-			if out == null or out.get("disabled") or not out.is_visible_in_tree():
-				continue
-			for w2: Node in windows:
-				if w2 == w or "containers" not in w2 or w2.get("closing"):
-					continue
-				if views.has(String(w2.name)) or favorites.has(String(w2.name)):
-					continue
-				for c2 in w2.get("containers"):
-					if not is_instance_valid(c2):
-						continue
-					var inp: Control = c2.get_node_or_null("InputConnector")
-					if inp == null or inp.get("disabled") or not inp.is_visible_in_tree():
-						continue
-					if inp.call("has_connection"):
-						continue
-					if not inp.call("can_connect", c, Utils.connections_types.OUTPUT):
-						continue
-					source_connector = out
-					target_connector = inp
-					break
-				if target_connector != null:
-					break
-			if target_connector != null:
-				break
-		if target_connector != null:
-			break
-
-	if source_connector == null or target_connector == null:
-		ModLoaderLog.warning("[selftest] No compatible unconnected connector pair found; skipping connection test.", LOG_NAME)
-		_test_capacity = 0
-		return
-
-	var source_window := _window_ancestor_of(source_connector)
-	var target_window := _window_ancestor_of(target_connector)
-	pin(source_window)
-	pin(target_window)
-	await get_tree().create_timer(1.0).timeout
-
-	var view_a: Node = views.get(String(source_window.name))
-	var view_b: Node = views.get(String(target_window.name))
-	if view_a == null or view_b == null:
-		ModLoaderLog.warning("[selftest] Pin views missing, aborting.", LOG_NAME)
-		_test_capacity = 0
-		return
-
-	# Verify the view -> world coordinate mapping round-trips.
-	var out_center: Vector2 = source_connector.get_global_rect().get_center()
-	var viewport_size: Vector2 = Vector2(view_a._viewport.size)
-	var view_pos: Vector2 = (out_center - view_a._camera.global_position) * view_a._camera.zoom.x + viewport_size * 0.5
-	var mapping_error: float = view_a._view_to_world(view_pos).distance_to(out_center)
-	ModLoaderLog.info("[selftest] view->world mapping error: %.3f px" % mapping_error, LOG_NAME)
-
-	# Synthesized test clicks carry exact world positions; the physical
-	# mouse is wherever the user left it, so disable mouse-based remapping.
-	Globals.desktop.set("np_skip_remap", true)
-
-	# Click the source node's OUTPUT through pin A.
-	var handled: bool = view_a._dispatch_world_click(out_center)
-	ModLoaderLog.info("[selftest] output click through pin A: handled=%s connecting=\"%s\" (expected \"%s\")" % [str(handled), Globals.connecting, source_connector.get("container").get("id")], LOG_NAME)
-
-	await get_tree().create_timer(0.5).timeout
-
-	# Click the target node's INPUT through pin B to complete the connection.
-	var in_center: Vector2 = target_connector.get_global_rect().get_center()
-	handled = view_b._dispatch_world_click(in_center)
-	await get_tree().create_timer(0.5).timeout
-
-	var source_id: String = source_connector.get("container").get("id")
-	var target_container = target_connector.get("container")
-	var target_id: String = target_container.get("id")
-	var connected: bool = target_container.get("input_id") == source_id
-	ModLoaderLog.info("[selftest] input click through pin B: handled=%s -> target input_id=\"%s\" (expected \"%s\")" % [str(handled), target_container.get("input_id"), source_id], LOG_NAME)
-
-	# Verify the auto-connect resolver picks the same target when dropping
-	# anywhere on pin B (used by the desktop extension for dragged drops).
-	var auto: Control = Globals.desktop.call("_np_auto_connector", view_b, source_id, Utils.connections_types.OUTPUT)
-	var auto_id: String = auto.get("container").get("id") if auto != null else "null"
-	ModLoaderLog.info("[selftest] auto-connect on pin B resolves to container \"%s\" (target was \"%s\")" % [auto_id, target_id], LOG_NAME)
-
-	# Cleanup: remove the test connection and any test pins, reset state.
-	if connected:
-		Signals.delete_connection.emit(source_id, target_id)
-		await get_tree().create_timer(0.5).timeout
-		ModLoaderLog.info("[selftest] cleanup: connection deleted, target input_id=\"%s\"" % target_container.get("input_id"), LOG_NAME)
-
-	Globals.desktop.set("np_skip_remap", false)
-	Globals.set_connecting("", 0)
-
-	# --- Favorites test: favorite both nodes under one color, free pin B,
-	# then swap pin A over to node B via the page-indicator path. The
-	# user's real favorites are snapshotted and restored afterwards, and
-	# the test uses a color group that has no existing favorites so the
-	# per-color cap cannot interfere.
-	var favorites_snapshot: Dictionary = favorites.duplicate(true)
-	var fav_color := -1
-	for color_candidate: int in range(PinViewScript.PIN_COLORS.size()):
-		if favorites_of_color(color_candidate).is_empty():
-			fav_color = color_candidate
-			break
-	var swap_ok := false
-	if fav_color < 0:
-		ModLoaderLog.warning("[selftest] no free color group, skipping favorites test", LOG_NAME)
-		swap_ok = true
-	else:
-		var key_a: String = String(source_window.name)
-		var key_b: String = String(target_window.name)
-		view_a.set("color_index", fav_color)
-		view_a.call("_apply_color")
-		view_b.set("color_index", fav_color)
-		view_b.call("_apply_color")
-		toggle_favorite(key_a, fav_color)
-		toggle_favorite(key_b, fav_color)
-		ModLoaderLog.info("[selftest] test color=%d same-color list=%s dots=%d" % [fav_color, str(favorites_of_color(fav_color)), favorite_dots.size()], LOG_NAME)
-
-		unpin_by_key(key_b)
-		await get_tree().create_timer(0.4).timeout
-		request_swap(view_a, key_b)
-		await get_tree().create_timer(0.6).timeout
-		swap_ok = String(view_a.get("window_key")) == key_b and views.has(key_b) and not views.has(key_a)
-		var cam_distance: float = (view_a._camera.global_position - (target_window.global_position + Vector2(target_window.size.x, target_window.size.y) * 0.5)).length()
-		ModLoaderLog.info("[selftest] swap: rekeyed=%s camera_near_target=%.1fpx" % [str(swap_ok), cam_distance], LOG_NAME)
-		unpin_by_key(key_b)
-
-	# Restore the user's favorites exactly as they were.
-	favorites = favorites_snapshot.duplicate(true)
-	for dot_key: String in favorite_dots.keys():
-		_remove_dot(dot_key)
-	_restore_favorite_dots()
-	_schedule_write()
-	ModLoaderLog.info("[selftest] user favorites restored: count=%d dots=%d" % [favorites.size(), favorite_dots.size()], LOG_NAME)
-	_test_capacity = 0
-
-	if connected and swap_ok:
-		ModLoaderLog.info("[selftest] CONNECTION + FAVORITES PASSED", LOG_NAME)
-	else:
-		ModLoaderLog.error("[selftest] FAILED (connected=%s swap=%s)" % [str(connected), str(swap_ok)], LOG_NAME)
-
-
-func _window_ancestor_of(node: Node) -> Control:
-	var current: Node = node
-	while current != null:
-		if current.is_in_group("window"):
-			return current
-		current = current.get_parent()
-	return null
 
 
 func _write_state() -> void:
