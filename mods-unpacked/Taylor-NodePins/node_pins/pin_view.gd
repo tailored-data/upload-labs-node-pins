@@ -22,6 +22,9 @@ const RESIZE_GRAB := 26.0
 const MIN_VIEW_SIZE := Vector2(160.0, 120.0)
 const HEADER_ICON_SIZE := Vector2(26, 26)
 const BOTTOM_CLEARANCE := 130.0
+# Pins render beneath the game's HUD (so menus stay on top), which means
+# anything overlapping the bottom bar gets covered — keep pins above it.
+const BOTTOM_UI_MARGIN := 100.0
 const FAVORITE_TINT := Color(1.0, 0.9, 0.4)
 
 const PIN_COLORS: Array[Color] = [
@@ -51,7 +54,8 @@ var _panel_style: StyleBoxFlat
 var _frame: Panel
 var _frame_style: StyleBoxFlat
 var _favorite_button: Button
-var _fav_row: HBoxContainer
+var _fav_strip: Control
+var _fav_keys: Array[String] = []
 var _saved_position := Vector2.INF
 var _dragging := false
 var _drag_offset := Vector2.ZERO
@@ -203,13 +207,19 @@ func _ready() -> void:
 	_camera = Camera2D.new()
 	_viewport.add_child(_camera)
 
-	# Page-indicator row for favorites, centered under the view: filled
-	# circle = the favorite currently in view; click an empty one to swap.
-	_fav_row = HBoxContainer.new()
-	_fav_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_fav_row.add_theme_constant_override("separation", 8)
-	_fav_row.visible = false
-	root.add_child(_fav_row)
+	# Page indicator for favorites: ONE control that both draws every
+	# circle and resolves clicks with the same geometry, so the visuals
+	# and the hit-testing can never disagree. Filled circle = the favorite
+	# currently in view; click an empty one to swap to it.
+	_fav_strip = Control.new()
+	_fav_strip.custom_minimum_size = Vector2(0, 22)
+	_fav_strip.mouse_filter = Control.MOUSE_FILTER_STOP
+	_fav_strip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_fav_strip.tooltip_text = "Favorites: click an empty circle to swap"
+	_fav_strip.visible = false
+	_fav_strip.draw.connect(_on_strip_draw)
+	_fav_strip.gui_input.connect(_on_strip_gui_input)
+	root.add_child(_fav_strip)
 
 	if manager.has_signal("favorites_changed"):
 		manager.connect("favorites_changed", _refresh_favorites)
@@ -240,19 +250,12 @@ func _process(delta: float) -> void:
 	_sync_favorite_fill()
 
 
-# Controls only repaint when told to: force a redraw the moment a circle's
-# filled/empty state no longer matches which node this pin is viewing, so
-# the drawn fill can never go stale against the click logic.
+# Controls only repaint when told to. Redraw the indicator strip every
+# frame so the drawn fill always reflects which node this pin is viewing
+# (a handful of 20px circles; the cost is negligible).
 func _sync_favorite_fill() -> void:
-	if _fav_row == null:
-		return
-	for circle in _fav_row.get_children():
-		if not circle.has_meta("fav_key"):
-			continue
-		var want_filled: bool = String(circle.get_meta("fav_key")) == window_key
-		if not circle.has_meta("np_drawn_filled") or bool(circle.get_meta("np_drawn_filled")) != want_filled:
-			circle.set_meta("np_drawn_filled", want_filled)
-			circle.queue_redraw()
+	if _fav_strip != null and _fav_strip.visible:
+		_fav_strip.queue_redraw()
 
 
 # --- Favorites -----------------------------------------------------------
@@ -277,47 +280,48 @@ func retarget(new_window: Control) -> void:
 
 
 func _refresh_favorites() -> void:
-	if _fav_row == null:
+	if _fav_strip == null:
 		return
-	for child in _fav_row.get_children():
-		child.queue_free()
 
 	# Stable order (no reordering): each circle represents one favorited
 	# node, and the FILL moves between circles as the view swaps.
-	var favorites: Array = manager.call("favorites_of_color", color_index)
-	_fav_row.visible = favorites.size() > 0
-
-	for key in favorites:
-		# Plain Controls with direct canvas draw calls: Button styleboxes
-		# proved unreliable under the game's global theme (circles rendered
-		# invisible with a collapsed hit area). Fill state and click action
-		# both check window_key LIVE, so the filled circle always tracks
-		# the node currently in view — no stale captured state.
-		var circle := Control.new()
-		circle.custom_minimum_size = Vector2(20, 20)
-		circle.mouse_filter = Control.MOUSE_FILTER_STOP
-		circle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		circle.tooltip_text = "Swap to this favorite"
-		var key_copy := String(key)
-		circle.set_meta("fav_key", key_copy)
-		var circle_color := PIN_COLORS[color_index]
-		circle.draw.connect(func() -> void:
-			var center := circle.size * 0.5
-			if key_copy == window_key:
-				circle.draw_circle(center, 7.0, circle_color)
-			else:
-				circle.draw_arc(center, 6.0, 0.0, TAU, 64, circle_color, 2.0, true)
-		)
-		circle.gui_input.connect(func(event: InputEvent) -> void:
-			if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-				if key_copy != window_key:
-					manager.call("request_swap", self, key_copy)
-		)
-		_fav_row.add_child(circle)
+	_fav_keys.clear()
+	for key in manager.call("favorites_of_color", color_index):
+		_fav_keys.append(String(key))
+	_fav_strip.visible = _fav_keys.size() > 0
+	_fav_strip.queue_redraw()
 
 	var is_favorite: bool = manager.call("is_favorite", window_key)
 	_favorite_button.self_modulate = FAVORITE_TINT if is_favorite else Color(1, 1, 1)
 	_favorite_button.tooltip_text = "Unfavorite this node" if is_favorite else "Favorite this node"
+
+
+# One circle slot is 20px wide with 8px gaps, the whole run centered in
+# the strip. Drawing and click hit-testing both use exactly this layout.
+func _circle_center(index: int) -> Vector2:
+	var total := float(_fav_keys.size()) * 20.0 + maxf(0.0, float(_fav_keys.size() - 1) * 8.0)
+	var start_x := (_fav_strip.size.x - total) * 0.5
+	return Vector2(start_x + float(index) * 28.0 + 10.0, _fav_strip.size.y * 0.5)
+
+
+func _on_strip_draw() -> void:
+	var circle_color := PIN_COLORS[color_index]
+	for index in _fav_keys.size():
+		var center := _circle_center(index)
+		if _fav_keys[index] == window_key:
+			_fav_strip.draw_circle(center, 7.0, circle_color)
+		else:
+			_fav_strip.draw_arc(center, 6.0, 0.0, TAU, 64, circle_color, 2.0, true)
+
+
+func _on_strip_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		for index in _fav_keys.size():
+			if event.position.distance_to(_circle_center(index)) <= 12.0:
+				if _fav_keys[index] != window_key:
+					manager.call("request_swap", self, _fav_keys[index])
+				_fav_strip.accept_event()
+				return
 
 
 # Initial frame size derives from the node's own dimensions (scaled, with
@@ -625,7 +629,8 @@ func _update_resize_cursor() -> void:
 
 func _clamp_to_screen() -> void:
 	var viewport_size := get_viewport_rect().size
-	position = position.clamp(Vector2.ZERO, (viewport_size - size).max(Vector2.ZERO))
+	var limit := (viewport_size - size - Vector2(0.0, BOTTOM_UI_MARGIN)).max(Vector2.ZERO)
+	position = position.clamp(Vector2.ZERO, limit)
 
 
 # --- UI construction and settings -------------------------------------------

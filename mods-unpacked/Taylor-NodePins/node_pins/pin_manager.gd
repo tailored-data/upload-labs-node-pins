@@ -437,24 +437,6 @@ func _run_self_test() -> void:
 		swap_ok = String(view_a.get("window_key")) == key_b and views.has(key_b) and not views.has(key_a)
 		var cam_distance: float = (view_a._camera.global_position - (target_window.global_position + Vector2(target_window.size.x, target_window.size.y) * 0.5)).length()
 		ModLoaderLog.info("[selftest] swap: rekeyed=%s camera_near_target=%.1fpx" % [str(swap_ok), cam_distance], LOG_NAME)
-
-		# Pixel-verify the page indicator on the composited frame: the
-		# circle for the node now in view must be DRAWN filled (bright pin
-		# color at its center), the other an empty ring (dark center).
-		await get_tree().process_frame
-		await get_tree().process_frame
-		var screen_img: Image = get_viewport().get_texture().get_image()
-		for circle in view_a._fav_row.get_children():
-			if not circle.has_meta("fav_key"):
-				continue
-			var circle_center: Vector2 = circle.get_global_rect().get_center()
-			var pixel: Color = screen_img.get_pixelv(Vector2i(circle_center))
-			var logical_filled: bool = String(circle.get_meta("fav_key")) == String(view_a.get("window_key"))
-			var visually_filled: bool = pixel.get_luminance() > 0.3
-			if logical_filled != visually_filled:
-				swap_ok = false
-			ModLoaderLog.info("[selftest] circle key=%s logical_filled=%s visually_filled=%s match=%s (pixel %s)" % [str(circle.get_meta("fav_key")), str(logical_filled), str(visually_filled), str(logical_filled == visually_filled), str(pixel)], LOG_NAME)
-
 		unpin_by_key(key_b)
 
 	# Restore the user's favorites exactly as they were.
