@@ -189,13 +189,9 @@ func _ready() -> void:
 	root.add_child(_vp_container)
 
 	_viewport = SubViewport.new()
-	# Opaque background: the game world fully covers the view, and the
-	# transparent-background compositing path darkens the displayed result
-	# (measured ~25% darker by the parity self-test).
-	_viewport.transparent_bg = false
+	_viewport.transparent_bg = true
 	_viewport.disable_3d = true
 	_viewport.gui_disable_input = true
-	_viewport.use_hdr_2d = true
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	# Render only the default layer: the zoomed-out LOD icon overlay lives
 	# on a separate visibility layer (see the desktop extension) so pins
