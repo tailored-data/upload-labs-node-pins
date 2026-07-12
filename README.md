@@ -11,7 +11,7 @@ Steam Workshop: [Node Pins (QoL) - https://steamcommunity.com/sharedfiles/filede
 - **Fully interactive — click or drag.** Clicks inside a pin are mapped into the world and applied to the real node, and **connection drags work too**: drag from any connector straight onto a pin (or from a pin's connector out into the world) and it connects. Dropping anywhere on a pin's frame **auto-connects** to the best compatible endpoint of that node. Compatible connectors glow inside the pin while connecting, and regular buttons on the node work through the pin.
 - **Draggable and resizable.** Grab a pin by its header to move it; drag its bottom-right corner to resize the frame. The ⚙ settings panel has a **zoom** slider for the node rendered inside the frame (hard-limited to a sane range). Everything is remembered per pin.
 - **Framed nodes.** The pinned node gets a vibrant colored border frame in the world so it's easy to spot — only the frame is colored, never the node's contents — and the pin's border matches. The 🎨 button cycles through six colors.
-- **Unlocked through normal gameplay.** "Node Pins" is a token-cost upgrade in the token store (Nodes tab): 5 pin slots costing 10, 20, 20, 30, 50 tokens. A second upgrade, **Extra Pin Slots**, adds up to 3 more slots (8 absolute max) at exponentially increasing Research costs starting at 1.0T (1T → 10T → 100T).
+- **Unlocked through normal gameplay.** "Node Pins" is a token-cost upgrade in the token store (Nodes tab): 5 pin slots costing 10, 20, 20, 30, 50 tokens. A second upgrade, **Extra Pin Slots** (requires at least one Node Pins level owned), adds up to 3 more slots (8 absolute max) at exponentially increasing Research costs starting at 1.0T (1T → 10T → 100T).
 - **Animated.** Pins slam in when created and peel away when removed.
 - **Live and persistent.** Pins render the real node through a viewport that shares the game world — progress bars and counts update in real time, even far off-screen (the mod keeps pinned nodes processing despite the game's off-screen optimizations). Pins, positions, sizes, zoom, colors, and favorites survive game restarts.
 
@@ -35,7 +35,7 @@ The game's mod loader also loads mods subscribed via the Steam Workshop. If you 
 1. Buy **Node Pins** in the token store → **Nodes** tab (it appears once you've passed the early game). Buy **Extra Pin Slots** with Research later for up to 3 more.
 2. Select any placed node — a pin button (⚲) appears in the options bar next to pause.
 3. Click it. The node slams onto the bottom-center of your screen and gets a colored frame so you can spot it in the world.
-4. Drag the pin by its header to place it; drag its bottom-right corner to resize. Use ★ to favorite, 🎨 to cycle its color, ⚙ for zoom, ✕ to unpin.
+4. Drag the pin by its header to place it; drag its bottom-right corner to resize. Use ★ to favorite, 🎨 to cycle its color, ⚙ for zoom, ✕ to unpin — or reselect the node and press the options-bar pin button again, which toggles it off the same way.
 5. To connect across the map: drag (or click) a connection from any node and drop it on the pin — landing anywhere on the pin auto-connects to the best matching endpoint, or hit a specific connector for full control. Works in both directions.
 6. Favorite two same-color nodes and use the circle indicator under the pin to flip the view between them.
 
@@ -82,16 +82,19 @@ The `mods-unpacked/<Namespace>-<ModName>/` layout inside the ZIP is the structur
 
 ## How it works
 
-- A script extension on the game's `Data` autoload injects the `node_pins` perk into `Data.perks` at load time. The game's own store UI, save system, unlock tracker, and purchase flow handle it natively from there — no UI scenes are patched.
-- A script extension on the options bar adds the pin button, gated by perk ownership.
+- A script extension on the game's `Data` autoload injects **two** perks into `Data.perks` at load time: `node_pins` (5 token-cost levels) and `node_pins_slots` (3 research-cost levels, requiring `node_pins`). The game's own store UI, save system, unlock tracker, and purchase flow handle both natively from there — no scene files are patched, only scripts extended.
+- One of those scripts *is* the store's perk-panel display, though: a script extension there overrides the computed price for `node_pins`, because its fixed per-level costs (10/20/20/30/50 tokens) don't fit the game's built-in `cost * cost_inc^level` formula. `node_pins_slots` fits the formula as-is, so its cost display is untouched.
+- A script extension on the options bar adds the pin button, gated by perk ownership. The button is a toggle — pinning and unpinning the currently selected node — so it doubles as the "Unpin" action alongside the pin's own ✕ button.
 - Each pin is a `SubViewport` sharing the main `World2D` with its own `Camera2D` locked onto the pinned node — a true live view drawn beneath the game's HUD.
 - Viewports that share a world share **rendering only**, not GUI input, so the pin maps every click through its camera into world coordinates and dispatches it to the real node: connector buttons receive the game's own connector press handling (start, cancel, complete, disconnect), and regular buttons are pressed directly.
-- The game normally hides and stops processing off-screen nodes; the mod keeps pinned nodes awake so their pins stay live.
+- A script extension on the desktop does the same remapping for connection drags: normally a drop resolves against whatever is behind the pin, so while the cursor is over a pin's view the drop point is redirected through that pin's camera into the pinned node's world space, then matched to the nearest compatible connector (the auto-connect behavior).
+- The game normally hides and stops processing off-screen nodes, and swaps distant nodes for a simplified zoomed-out icon; the mod keeps pinned nodes awake and renders pins on a visibility layer that skips that icon, so a pin always shows the live node in full detail regardless of where the main camera is or how far it's zoomed.
+- Pin positions, sizes, zoom, colors, and favorites are written to `user://taylor_node_pins.json` (separate from the mod's config file) shortly after each change, and reloaded on the next desktop load.
 
 ## Compatibility
 
 - Game version: 2.2.12 (Godot 4.6.1, Godot Mod Loader 7.0.1)
-- Save-safe both ways: installing adds one perk entry; uninstalling leaves saves loadable (the game skips unknown perk ids by design).
+- Save-safe both ways: installing adds two perk entries (`node_pins`, `node_pins_slots`); uninstalling leaves saves loadable (the game skips unknown perk ids by design).
 
 ## License
 
