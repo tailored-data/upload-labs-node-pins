@@ -102,8 +102,8 @@ func _ready() -> void:
 	_panel_style.bg_color = Color(0.098, 0.122, 0.169, 1.0)
 	_panel_style.set_corner_radius_all(10)
 	_panel_style.set_content_margin_all(8)
-	_panel_style.content_margin_bottom = 14.0
-	_panel_style.content_margin_right = 14.0
+	_panel_style.content_margin_bottom = 10.0
+	_panel_style.content_margin_right = 8.0
 	_panel_style.set_border_width_all(2)
 	add_theme_stylebox_override("panel", _panel_style)
 
@@ -215,7 +215,7 @@ func _ready() -> void:
 	_fav_strip.custom_minimum_size = Vector2(0, 22)
 	_fav_strip.mouse_filter = Control.MOUSE_FILTER_STOP
 	_fav_strip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	_fav_strip.tooltip_text = "Favorites: click a filled circle to swap"
+	_fav_strip.tooltip_text = "Click an empty circle to swap nodes"
 	_fav_strip.visible = false
 	_fav_strip.draw.connect(_on_strip_draw)
 	_fav_strip.gui_input.connect(_on_strip_gui_input)
@@ -309,9 +309,12 @@ func _on_strip_draw() -> void:
 	for index in _fav_keys.size():
 		var center := _circle_center(index)
 		if _fav_keys[index] == window_key:
-			_fav_strip.draw_circle(center, 7.0, circle_color)
+			# filled circle
+			_fav_strip.draw_circle(center, 6.0, circle_color, true, -1.0, true)
 		else:
-			_fav_strip.draw_arc(center, 6.0, 0.0, TAU, 64, circle_color, 2.0, true)
+			# unfilled circle
+			_fav_strip.draw_circle(center, 6.0, circle_color, false, 1.0, true)
+			
 
 
 func _on_strip_gui_input(event: InputEvent) -> void:
